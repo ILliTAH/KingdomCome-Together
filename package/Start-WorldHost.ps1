@@ -83,11 +83,9 @@ function Test-WorldLoaded {
 function Test-LoadStarted {
     $log = Join-Path (Get-GameRoot $GameExe) 'kcd.log'
     if (-not (Test-Path -LiteralPath $log)) { return $true }      # cannot tell: do not risk a second load
-    try {
-        $fs = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
-        try { $text = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
-        return $text.Contains("Loading saved game") -and $text.Contains("/$Save.whs")
-    } catch { return $true }
+    # A log that cannot be read right now counts as "started", for the same reason.
+    $any = [datetime]::MinValue
+    return (Test-LogContains $log 'Loading saved game' $any $true) -and (Test-LogContains $log "/$Save.whs" $any $true)
 }
 
 Add-Type -Namespace Kcdmp -Name Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);'
@@ -139,15 +137,89 @@ if (-not $NoRelay) {
     }
 }
 
-# 3. Game.
-if (-not $running) {
+# 3. Steam, then the game.
+#
+# The game is started directly, not through Steam, and needs the Steam client
+# up and logged in at that moment: without it the game logs "SteamApi_Init
+# failed" and stops at a "License not verified / No SteamApps" box with the
+# debug API down. (The original project hit the same; the first real host run
+# of this script did too.) So Steam is started here when it is not running,
+# and a game that could not reach it is closed and started again -- Steam
+# takes a while to log in -- before this gives up and says what to do.
+$steamFailed = 'The game could not reach Steam ("License not verified"). On this machine, in this Windows account: start Steam, log in ' +
+    'with an account that owns Kingdom Come: Deliverance II and wait for the Library, then run this again. If Steam was already up and ' +
+    'logged in, the usual cause is that the same Steam account is playing on another machine (not checked by this script).'
+
+# $true when Steam is running in this session afterwards, or was started.
+function Start-SteamClient {
+    if (Get-SessionProcess 'steam') { return $true }
+    $root = Get-SteamRoot
+    $exe = if ($root) { Join-Path $root 'steam.exe' } else { $null }
+    if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
+        Write-Warning 'Steam is not running in this Windows account and steam.exe was not found. Start Steam and log in; the game needs it.'
+        return $false
+    }
+    Write-Host 'Steam is not running in this Windows account: starting it and giving it 45 seconds to log in...'
+    try { Start-Process -FilePath $exe -ArgumentList '-silent' }
+    catch { Write-Warning "Steam could not be started: $($_.Exception.Message)"; return $false }
+    Start-Sleep -Seconds 45
+    return $true
+}
+
+# The game this script started, and nothing else of that name.
+function Stop-HostGame {
+    # Best effort throughout: a process that is already gone, or cannot be
+    # asked when it started, must not stop the script.
+    try { if ($game -and -not $game.HasExited) { Stop-Process -Id $game.Id -Force -ErrorAction Stop } } catch { }
+    foreach ($p in Get-SessionProcess 'KingdomCome') {
+        try { if ($p.StartTime -ge $startedAt.AddSeconds(-5)) { Stop-Process -Id $p.Id -Force -ErrorAction Stop } } catch { }
+    }
+}
+
+function Start-HostGame {
     Write-Host 'Starting the Modding Tools game...'
-    Start-Process -FilePath $GameExe -WorkingDirectory (Get-SteamWorkingDir $GameExe)
+    return Start-Process -FilePath $GameExe -WorkingDirectory (Get-SteamWorkingDir $GameExe) -PassThru
+}
+
+# What the game writes to its log when it cannot reach Steam, as the original
+# project recorded it. Only that: a phrase guessed from the dialog could match
+# a healthy log and have a working game closed. If this build words it
+# differently, nothing is closed and the wait below ends with a message that
+# names the dialog.
+function Test-SteamRefused { return (Test-LogContains $gameLog 'SteamApi_Init failed' $startedAt) }
+
+$gameLog = Join-Path (Get-GameRoot $GameExe) 'kcd.log'
+$game = $null
+$startedAt = Get-Date
+if (-not $running) {
+    if (-not (Test-Path -LiteralPath (Join-Path (Get-SteamWorkingDir $GameExe) 'steam_appid.txt'))) {
+        Write-Warning 'steam_appid.txt was not found above the game: started outside Steam, the game may not know which Steam app it is.'
+    }
+    $steamUp = Start-SteamClient
+    $startedAt = Get-Date
+    $game = Start-HostGame
 }
 Write-Host 'Waiting for the game''s debug API on port 1403...'
+$attempt = 1
 $deadline = (Get-Date).AddMinutes(5)
 while (-not (Test-ApiUp)) {
-    if ((Get-Date) -gt $deadline) { throw 'Port 1403 never answered. Is this the Modding Tools build?' }
+    if ((Get-Date) -gt $deadline) {
+        # Left open, the game would make the next run skip everything above.
+        if ($game) { Stop-HostGame }
+        throw 'Port 1403 never answered. If the game showed "License not verified", Steam was not running or not logged in (in this Windows account) with an account that owns the game; otherwise check that this is the Modding Tools build. Close the game before running this again.'
+    }
+    if ($game -and (Test-SteamRefused)) {
+        Stop-HostGame
+        # No Steam here and none that could be started: another try changes nothing.
+        if ($attempt -ge 3 -or -not $steamUp) { throw $steamFailed }
+        $attempt++
+        Write-Warning "The game could not reach Steam. Closing it and trying again in 30 seconds (attempt $attempt of 3)..."
+        Start-Sleep -Seconds 30
+        $steamUp = Start-SteamClient
+        $startedAt = Get-Date
+        $game = Start-HostGame
+        $deadline = (Get-Date).AddMinutes(5)
+    }
     Start-Sleep -Seconds 2
 }
 try { Invoke-GameConsole 'wh_ui_PauseGameOnFocusLoss 0' } catch { Write-Warning "Could not turn off pause-on-focus-loss: $($_.Exception.Message)" }

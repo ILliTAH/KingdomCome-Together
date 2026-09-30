@@ -504,6 +504,19 @@ namespace KCDMP_launcher.Pages
                 return;
             }
 
+            // The game is started directly, not through Steam, and needs the
+            // Steam client up and logged in at that moment: without it the
+            // game stops at "License not verified / No SteamApps".
+            // In this Windows session: another account's Steam does not serve this one's game.
+            int session = Process.GetCurrentProcess().SessionId;
+            if (!Process.GetProcessesByName("steam").Any(p => p.SessionId == session))
+            {
+                UiService.ShowError(
+                    "Steam is not running. Start Steam and log in, wait for your Library, then launch again. " +
+                    "Started without it, the game stops at \"License not verified\".");
+                return;
+            }
+
             if (!EnsureSteamModInstalled()) return;
 
             string dllFullPath = ResolveAgainstLauncher(settings.DllPath);

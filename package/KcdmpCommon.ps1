@@ -26,8 +26,33 @@ function Get-GamePassModDir {
 }
 
 # --- Steam, Modding Tools build ---------------------------------------------
+# Where Steam is installed: the per-user value first, then the machine-wide
+# ones, which are all there is when Windows is logged in as a different
+# account from the one that set Steam up -- the usual state of a server.
+# A folder as Steam writes it (forward slashes, sometimes a trailing one). A
+# drive root keeps its backslash: "D:" alone is "the current folder on D".
+function ConvertTo-WindowsDir([string] $path) {
+    $dir = $path.Replace('/', '\').TrimEnd('\')
+    if ($dir -match '^[A-Za-z]:$') { $dir += '\' }
+    return $dir
+}
+
+function Get-SteamRoot {
+    $candidates = @(
+        (Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath,
+        (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath,
+        (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath
+    )
+    foreach ($c in $candidates) {
+        if (-not $c) { continue }
+        $dir = ConvertTo-WindowsDir ([string]$c)
+        if (Test-Path -LiteralPath $dir) { return $dir }
+    }
+    return $null
+}
+
 function Get-SteamLibraries {
-    $steam = (Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
+    $steam = Get-SteamRoot
     if (-not $steam) { return @() }
     $libs = @($steam)
     $vdf = Join-Path $steam 'steamapps\libraryfolders.vdf'
@@ -166,6 +191,28 @@ function Find-PackageExe([string] $name) {
         if (Test-Path -LiteralPath $p) { return $p }
     }
     throw "$name is missing from $($script:KcdmpRoot)."
+}
+
+# --- the game's log -----------------------------------------------------------
+# True when the log was written since $since and holds $text (any case). The
+# game keeps the file open, so it is read with full sharing. A log that is
+# there but cannot be read answers $onError: which answer is the safe one is
+# the caller's to say.
+function Test-LogContains([string] $path, [string] $text, [datetime] $since, [bool] $onError = $false) {
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    try {
+        if ((Get-Item -LiteralPath $path).LastWriteTime -lt $since) { return $false }
+        $fs = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
+        try { $content = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+        return $content.IndexOf($text, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    } catch { return $onError }
+}
+
+# A process of this name in this Windows session. Another account's Steam, or
+# another account's game, is not ours to count on or to close.
+function Get-SessionProcess([string] $name) {
+    $session = (Get-Process -Id $PID).SessionId
+    return @(Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session })
 }
 
 # --- the mod ----------------------------------------------------------------

@@ -31,6 +31,10 @@ public class SteamDetectionTests
         // Steam writes its own path with forward slashes; the first candidate is a stale entry.
         Assert.Equal(real, GameInstalls.FirstExistingDir([Path.Combine(s.Root, "gone"), null, "", real.Replace('\\', '/') + "/"]));
         Assert.Null(GameInstalls.FirstExistingDir([null, Path.Combine(s.Root, "gone")]));
+
+        // Steam installed at a drive root: "D:" alone would mean the current folder on D.
+        string drive = Path.GetPathRoot(s.Root)!;
+        Assert.Equal(drive, GameInstalls.FirstExistingDir([drive.Replace('\\', '/')]));
     }
 
     [Fact]

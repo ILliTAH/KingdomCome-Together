@@ -55,6 +55,28 @@ Check 'mod: leftovers in the mod folder are removed' ((@(Get-ChildItem $modDir -
 Check 'mod: a neighbouring mod is not touched' ((Get-Content (Join-Path $tmp 'game\Mods\othermod\other.pak')) -eq 'not ours')
 Check 'game running: answers without error' ((Test-GameRunning) -is [bool])
 
+# What the game wrote to its log since a given moment: how the host script
+# tells "could not reach Steam" from "still starting".
+$log = Join-Path $tmp 'kcd.log'
+Set-Content $log @('line one', 'SteamApi_Init failed', 'line three')
+Check 'log: a line that is there is found' (Test-LogContains $log 'steamapi_init FAILED' (Get-Date).AddMinutes(-1))
+Check 'log: a line that is not there is not' (-not (Test-LogContains $log 'Loading saved game' (Get-Date).AddMinutes(-1)))
+Check 'log: a log from before the game started does not count' (-not (Test-LogContains $log 'SteamApi_Init failed' (Get-Date).AddMinutes(1)))
+Check 'log: no log is not a match' (-not (Test-LogContains (Join-Path $tmp 'none.log') 'x' (Get-Date).AddMinutes(-1)))
+$held = [IO.File]::Open($log, 'Open', 'ReadWrite', 'ReadWrite')     # the game keeps its log open
+Check 'log: readable while the game holds it open' (Test-LogContains $log 'SteamApi_Init failed' (Get-Date).AddMinutes(-1))
+$held.Dispose()
+# A log that cannot be read says nothing either way: the caller chooses which
+# answer is the safe one (for "has the load started?" it is yes).
+$held = [IO.File]::Open($log, 'Open', 'ReadWrite', 'None')
+Check 'log: unreadable is "no" by default' (-not (Test-LogContains $log 'SteamApi_Init failed' (Get-Date).AddMinutes(-1)))
+Check 'log: unreadable is "yes" when the caller says so' (Test-LogContains $log 'SteamApi_Init failed' (Get-Date).AddMinutes(-1) $true)
+$held.Dispose()
+
+# Steam's folder as the registry gives it.
+Check 'steam path: forward slashes and a trailing slash' ((ConvertTo-WindowsDir 'c:/program files (x86)/steam/') -eq 'c:\program files (x86)\steam')
+Check 'steam path: a drive root stays a root' ((ConvertTo-WindowsDir 'D:/') -eq 'D:\')
+
 # The agent and the relay: beside the scripts (installed), or in their own folders.
 $threw = $false; try { Find-PackageExe 'KcdMpClient.exe' } catch { $threw = $true }
 Check 'package exe: a missing one is an error, not a wrong path' $threw

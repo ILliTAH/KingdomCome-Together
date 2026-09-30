@@ -120,6 +120,7 @@ namespace KCDMP_launcher.Models
             {
                 if (string.IsNullOrWhiteSpace(c)) continue;
                 string dir = c.Replace('/', '\\').TrimEnd('\\');
+                if (dir.Length == 2 && dir[1] == ':') dir += "\\";   // "D:" alone is the current folder on D
                 if (Directory.Exists(dir)) return dir;
             }
             return null;

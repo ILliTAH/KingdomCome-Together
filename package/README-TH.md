@@ -57,6 +57,10 @@
   - *"Steam lists the KCD2 Modding tools, but their files are not on disk"* = ยังดาวน์โหลดไม่เสร็จ
   - หรือกด BROWSE ใส่ path เอง: Steam = `...\steamapps\common\KCD2Mod\Bin\Win64ReleaseSteamLTO_DLL\KingdomCome.exe`,
     Game Pass = `...\Kingdom Come- Deliverance II\Content\KingdomCome.exe`
+- **เกมขึ้นหน้าต่าง `License not verified` / `No SteamApps`** (Steam) → ตอนเกมเปิด Steam ยังไม่ได้รันหรือยังไม่ได้ล็อกอิน
+  เปิด Steam (ในบัญชี Windows เดียวกับที่รัน launcher) ล็อกอินด้วยบัญชีที่มีเกม รอจนขึ้น Library แล้วกดใหม่
+  (World Host: สคริปต์พยายามเปิด Steam และลองใหม่ให้เอง — ส่วนนี้ยังไม่เคยรันจริง)
+  ถ้า Steam เปิดและล็อกอินอยู่แล้ว สาเหตุที่พบบ่อยคือบัญชี Steam เดียวกันกำลังเล่นอยู่อีกเครื่อง — เครื่องเซิร์ฟเวอร์ควรใช้บัญชีของตัวเองที่มีเกม
 - **`The game is already running without -devmode`** (Game Pass) → ปิดเกม แล้วกด JOIN ใหม่
 - **`The game is running with a different version of the mod`** → ปิดเกม แล้วกด JOIN ใหม่ให้ม็อดถูกวางใหม่
 - **ไม่ขึ้น `Game ready!`** → ต้องมีเซฟที่โหลดแล้วและยืนอยู่ในโลกเกม; ดู `Documents\kcd.log` (Game Pass) ว่ามี `=== MOD INIT ===`
