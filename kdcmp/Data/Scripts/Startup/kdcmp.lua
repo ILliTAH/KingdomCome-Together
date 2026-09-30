@@ -61,6 +61,8 @@ KCD2MP.horseAdoptEnabled = true -- WO-40 Phase 0: mp_horse_adopt on|off -- field
 -- player while its owner sat in a menu. mp_ghost_ignorant off restores the
 -- old behaviour.
 KCD2MP.ghostsIgnorant = true
+-- Game Pass fork: peers' stand-ins copy the local player's look (see SpawnGhost).
+KCD2MP.ghostCloneLook = true
 KCD2MP._horseInfoSentName = nil -- last horse_info payload actually emitted (change gate)
 KCD2MP._horseInfoSentAt = 0     -- for the 30s re-emit while mounted (late joiners)
 KCD2MP.workingClass = "AnimObject"
@@ -1858,8 +1860,142 @@ KCD2MP.npcSync = {
     scanMs     = 2000,    -- how often the tracked set is rebuilt
     moveEps    = 0.05,    -- metres; below this nothing is emitted
     heartbeatS = 2.0,     -- unconditional resend so a late joiner converges
-    releaseS   = 3.0,     -- receiver: packet age at which a puppet is released
+    releaseS   = 8.0,     -- receiver: packet age at which a puppet is released.
+                          -- Host world: was 3.0, one late heartbeat from the
+                          -- 2 s resend above -- live, 54 of 82 releases were
+                          -- re-grabbed within 10 s, each one a snap home and a
+                          -- snap back. 8 s rides out three missed heartbeats.
+    hostMaxTracked = 40,  -- host world: what a host reports instead of maxTracked
+    hostRadius     = 60,  -- host world: and how far out, instead of radius
+    puppetTickMs   = 33,  -- receiver: puppet update interval (was a fixed 50)
 }
+
+-- ===== Host world =====
+--
+-- Two games cannot agree on where an NPC is: each runs its own AI. So one
+-- game is the world and the others display it. A host reports the NPCs around
+-- it (hostMaxTracked within hostRadius); a guest reports none -- no state, no
+-- proximity claims, no drag claims -- so nothing it does can take an NPC away
+-- from the host, and it only moves puppets.
+--
+-- Who is the host, in order:
+--   1. mp_world_role host|guest says so outright (a dedicated host machine
+--      is told "host" by its launcher).
+--   2. A peer whose name starts with "[HOST]" is in the session: that is a
+--      dedicated world host, so everyone else is a guest -- including a
+--      Modding Tools player -- and that peer's stand-in is never shown.
+--   3. Otherwise the build decides: a game that can spawn soul-bound entities
+--      (XGenAIModule.SpawnEntity, Modding Tools only) hosts, a retail or Game
+--      Pass game is a guest. Two Modding Tools players are then both hosts and
+--      behave as stock 0.18.2, with the relay's per-entity claims arbitrating.
+KCD2MP.worldRole = "auto"   -- "host" | "guest" | "auto"; mp_world_role sets it
+KCD2MP.worldHostIds = {}    -- ghost id -> true: peers named as a dedicated world host
+
+function KCD2MP_IsWorldHostName(name)
+    return type(name) == "string" and string.sub(name, 1, 6) == "[HOST]"
+end
+
+function KCD2MP_WorldRole()
+    local r = KCD2MP.worldRole
+    if r == "host" or r == "guest" then return r end
+    if next(KCD2MP.worldHostIds) then return "guest" end
+    if XGenAIModule and XGenAIModule.SpawnEntity then return "host" end
+    return "guest"
+end
+
+function KCD2MP_SetWorldRole(arg)
+    local s = tostring(arg or ""):lower()
+    if s:find("host") then KCD2MP.worldRole = "host"
+    elseif s:find("guest") then KCD2MP.worldRole = "guest"
+    elseif s:find("auto") then KCD2MP.worldRole = "auto"
+    else
+        mp_log("mp_world_role: expected host|guest|auto (currently " .. KCD2MP.worldRole
+            .. ", acting as " .. KCD2MP_WorldRole() .. ")")
+        return false
+    end
+    if KCD2MP_WorldRole() == "guest" then KCD2MP.npcTracked = {} end
+    mp_log("WORLD-ROLE " .. KCD2MP.worldRole .. " -> acting as " .. KCD2MP_WorldRole())
+    KCD2MP_ShowInteractionMsg("World role: " .. KCD2MP_WorldRole())
+    return true
+end
+
+-- A dedicated host has nobody playing it, and a game only simulates the NPCs
+-- around its own player. So the host's player follows the guests: when it has
+-- drifted more than maxDrift from where they are, it is placed back among
+-- them. UNTESTED on a live Modding Tools host as of 2026-09-30 -- written on
+-- a Game Pass machine; see docs/HOST-WORLD-GUIDE.md for what to verify.
+KCD2MP.worldHostFollow = {
+    enabled  = false,   -- mp_world_host_follow on|off
+    maxDrift = 12,      -- metres the host may be from the guests before it is moved
+    spread   = 30,      -- metres: guests farther apart than this are not one group
+    everyMs  = 1000,
+}
+KCD2MP._worldHostFollowRunning = false
+
+-- Where the host should stand: the middle of the guests when they are
+-- together, otherwise the guest with the lowest id (so the choice is stable
+-- while they are apart). Nil with no guests.
+function KCD2MP_WorldHostFollowTarget()
+    local n, sx, sy, sz = 0, 0, 0, 0
+    local firstId, first = nil, nil
+    for id, g in pairs(KCD2MP.ghosts) do
+        local i = g.istate
+        if i and i.tx and i.ty and i.tz then
+            n = n + 1
+            sx, sy, sz = sx + i.tx, sy + i.ty, sz + i.tz
+            local num = tonumber(id) or math.huge
+            if not firstId or num < firstId then firstId, first = num, i end
+        end
+    end
+    if n == 0 then return nil end
+    local cx, cy, cz = sx / n, sy / n, sz / n
+    for _, g in pairs(KCD2MP.ghosts) do
+        local i = g.istate
+        if i and i.tx and i.ty then
+            local dx, dy = i.tx - cx, i.ty - cy
+            if dx * dx + dy * dy > KCD2MP.worldHostFollow.spread * KCD2MP.worldHostFollow.spread then
+                return first.tx, first.ty, first.tz
+            end
+        end
+    end
+    return cx, cy, cz
+end
+
+function KCD2MP_WorldHostFollowTick()
+    if not KCD2MP._worldHostFollowRunning then return end
+    Script.SetTimer(KCD2MP.worldHostFollow.everyMs, KCD2MP_WorldHostFollowTick)  -- reschedule FIRST
+    if not KCD2MP.worldHostFollow.enabled or KCD2MP_WorldRole() ~= "host" or not player then return end
+    pcall(function()
+        local x, y, z = KCD2MP_WorldHostFollowTarget()
+        if not x then return end
+        local pp = player:GetWorldPos()
+        local dx, dy = pp.x - x, pp.y - y
+        if dx * dx + dy * dy > KCD2MP.worldHostFollow.maxDrift * KCD2MP.worldHostFollow.maxDrift then
+            player:SetWorldPos({ x = x, y = y, z = z })
+            mp_log(string.format("WORLD-HOST follow: moved to %.1f,%.1f,%.1f (was %.1f m away)",
+                x, y, z, math.sqrt(dx * dx + dy * dy)))
+        end
+    end)
+end
+
+function KCD2MP_SetWorldHostFollow(arg)
+    local s = tostring(arg or ""):lower()
+    if s:find("on") then KCD2MP.worldHostFollow.enabled = true
+    elseif s:find("off") then KCD2MP.worldHostFollow.enabled = false
+    else
+        mp_log("mp_world_host_follow: expected on|off (currently "
+            .. (KCD2MP.worldHostFollow.enabled and "on" or "off") .. ")")
+        return false
+    end
+    if KCD2MP.worldHostFollow.enabled and not KCD2MP._worldHostFollowRunning then
+        KCD2MP._worldHostFollowRunning = true
+        Script.SetTimer(KCD2MP.worldHostFollow.everyMs, KCD2MP_WorldHostFollowTick)
+    elseif not KCD2MP.worldHostFollow.enabled then
+        KCD2MP._worldHostFollowRunning = false
+    end
+    mp_log("WORLD-HOST follow " .. (KCD2MP.worldHostFollow.enabled and "ON" or "off"))
+    return true
+end
 KCD2MP.npcSyncRunning  = false
 KCD2MP._npcSyncAliveAt = nil
 KCD2MP.npcTracked      = {}   -- name -> {lastX,lastY,lastZ,lastRot,lastHp,lastSentAt}
@@ -2013,8 +2149,11 @@ local function mp_npc_rescan()
     if not pp then return end
 
     local found = {}
-    local enterRadius = KCD2MP.npcSync.radius
-    local exitRadius  = enterRadius * NPC_TRACK_EXIT_FACTOR
+    local isHost = KCD2MP_WorldRole() == "host"
+    local enterRadius = isHost and KCD2MP.npcSync.hostRadius or KCD2MP.npcSync.radius
+    -- A host's radius is a hard edge: beyond it the guest is looking at its
+    -- own world anyway, and the 1.5x exit margin would query a 90 m sphere.
+    local exitRadius  = isHost and enterRadius or (enterRadius * NPC_TRACK_EXIT_FACTOR)
     local ents = System.GetEntitiesInSphere(pp, exitRadius) or {}
     for _, e in ipairs(ents) do
         local cls = e.class
@@ -2051,7 +2190,7 @@ local function mp_npc_rescan()
     table.sort(found, function(a, b) return a.rank < b.rank end)
 
     local keep = {}
-    for i = 1, math.min(#found, KCD2MP.npcSync.maxTracked) do
+    for i = 1, math.min(#found, isHost and KCD2MP.npcSync.hostMaxTracked or KCD2MP.npcSync.maxTracked) do
         local name = found[i].name
         keep[name] = true
         if not KCD2MP.npcTracked[name] then
@@ -2181,6 +2320,11 @@ function KCD2MP_NpcSyncTick()
     -- Gate at tick time, not start time: mp_npc_sync can flip and authority
     -- can migrate mid-session, and both must take effect without a restart.
     if not KCD2MP.npcSync.enabled then return end
+    -- Host world: a guest displays the host's NPCs and reports none of its own.
+    if KCD2MP_WorldRole() == "guest" then
+        if next(KCD2MP.npcTracked) then KCD2MP.npcTracked = {} end
+        return
+    end
     local isAuthority = KCD2MP.hitSensorOn
     if not isAuthority then
         -- WO-39 Phase 2: a non-authority always watches for bodies its own
@@ -2330,6 +2474,20 @@ function KCD2MP_ApplyNpcState(name, x, y, z, rot, hp, flags)
         local hexid = string.match(tostring(e.id), "(%x+)%s*$")
         if hexid then KCD2MP_EmitEvent("npcid", name .. " " .. hexid) end
     end
+    -- Host world: velocity over a real interval, as for ghosts. Packets come at
+    -- 4 Hz while an NPC moves; two that land in one frame must not read as a
+    -- sprint, so the baseline only advances once 0.12 s has passed.
+    local nowP = os.clock()
+    if not p.pktT or (nowP - p.pktT) >= 1.0 then
+        if p.pktT then p.vx, p.vy = 0, 0 end
+        p.pktT, p.pktX, p.pktY = nowP, x, y
+    elseif (nowP - p.pktT) >= 0.12 then
+        local pdt = nowP - p.pktT
+        p.vx = lerpVal(p.vx or 0, (x - p.pktX) / pdt, 0.6)
+        p.vy = lerpVal(p.vy or 0, (y - p.pktY) / pdt, 0.6)
+        p.gap = lerpVal(p.gap or 0.25, pdt, 0.3)
+        p.pktT, p.pktX, p.pktY = nowP, x, y
+    end
     p.tx, p.ty, p.tz, p.tr = x, y, z, rot
     p.hp = hp
     local f = tonumber(flags) or 0
@@ -2383,7 +2541,7 @@ function KCD2MP_NpcPuppetTick(arg)
     -- The agent's menu pump now calls this with arg="ext": no reschedule, no
     -- alive-stamp (a pumped call must not make a dead chain look healthy).
     if arg ~= "ext" then
-        Script.SetTimer(50, KCD2MP_NpcPuppetTick)  -- reschedule FIRST
+        Script.SetTimer(KCD2MP.npcSync.puppetTickMs, KCD2MP_NpcPuppetTick)  -- reschedule FIRST
         KCD2MP._npcPuppetAliveAt = os.clock()
     end
 
@@ -2524,17 +2682,59 @@ function KCD2MP_NpcPuppetTick(arg)
                 end
             end
 
-            -- Same teleport-vs-lerp shape as the ghost interp: snap on a big
-            -- gap, smooth otherwise.
-            local dx, dy = (p.tx or p.cx) - p.cx, (p.ty or p.cy) - p.cy
+            -- Host world: an NPC in a conversation here stays where it is.
+            -- The host's copy keeps to its schedule, and following it would
+            -- drag the NPC away mid-sentence. The puppet picks up from the
+            -- NPC's real position when the talk ends.
+            local inDialog = false
+            pcall(function() inDialog = e.human and e.human:IsInDialog() == true end)
+            if inDialog then
+                local wp = e:GetWorldPos()
+                if wp then p.cx, p.cy, p.cz = wp.x, wp.y, wp.z end
+                p.tickAt = now
+                return
+            end
+
+            -- Host world: the same continuous-motion model as the ghosts.
+            -- Closing half the gap per tick covered each 4 Hz step at once
+            -- and then stood still until the next packet (simulated: walking
+            -- pace on 13% of frames, standing on a third of them). The
+            -- target now keeps moving at the measured velocity for one packet
+            -- interval, eases back when the next packet is late, and is
+            -- followed on real time. A gap over 5 m still snaps.
+            local dtP = now - (p.tickAt or (now - 0.033))
+            p.tickAt = now
+            if dtP < 0.001 then dtP = 0.001 elseif dtP > 0.2 then dtP = 0.2 end
+            local tgx, tgy = p.tx or p.cx, p.ty or p.cy
+            local pvx, pvy = p.vx or 0, p.vy or 0
+            if (pvx*pvx + pvy*pvy) > 0.09 then
+                local gap = p.gap or 0.25
+                if gap < 0.1 then gap = 0.1 elseif gap > 0.6 then gap = 0.6 end
+                local age = now - (p.lastPacketAt or now)
+                local lead = 0
+                if age <= 1.5 * gap then
+                    lead = math.min(age, gap)
+                elseif age < 2.5 * gap then
+                    lead = 2.5 * gap - age
+                else
+                    p.vx, p.vy = 0, 0
+                end
+                tgx, tgy = tgx + pvx * lead, tgy + pvy * lead
+            end
+            local prevPx, prevPy = p.cx, p.cy
+            local dx, dy = tgx - p.cx, tgy - p.cy
             if dx*dx + dy*dy > 25.0 then
                 p.cx, p.cy, p.cz, p.cr = p.tx, p.ty, p.tz, p.tr
+                prevPx, prevPy = p.cx, p.cy   -- a snap is not a sprint
             else
-                p.cx = p.cx + dx * 0.5
-                p.cy = p.cy + dy * 0.5
+                local follow = 1 - math.exp(-dtP / 0.15)
+                p.cx = p.cx + dx * follow
+                p.cy = p.cy + dy * follow
                 p.cz = p.tz or p.cz
                 p.cr = p.tr or p.cr
             end
+            local rendP = math.sqrt((p.cx - prevPx)^2 + (p.cy - prevPy)^2) / dtP
+            p.spd = lerpVal(p.spd or 0, rendP, 1 - math.exp(-dtP / 0.15))
 
             e:SetWorldPos({x = p.cx, y = p.cy, z = p.cz})
             p.lastWroteX, p.lastWroteY = p.cx, p.cy
@@ -2548,7 +2748,7 @@ function KCD2MP_NpcPuppetTick(arg)
             -- humanoid locomotion. These three names were confirmed present
             -- on real KCD2 horse entities by the mp_scan_horse probes (see
             -- the HORSE_ENTITY_* candidate lists' comments).
-            local spd = math.sqrt(dx*dx + dy*dy) * 0.5 / 0.050
+            local spd = p.spd or 0
             local tag, anim
             if tostring(e.class or "") == "Horse" then
                 if     spd >= 4.0 then tag, anim = "gallop", "relaxed_gallop"
@@ -2600,8 +2800,8 @@ function KCD2MP_StartNpcPuppet()
     if tickAlive(KCD2MP.npcPuppetRunning, KCD2MP._npcPuppetAliveAt) then return end
     KCD2MP.npcPuppetRunning = true
     KCD2MP._npcPuppetAliveAt = os.clock()
-    mp_log("NPC-SYNC puppet tick started (50ms)")
-    Script.SetTimer(50, KCD2MP_NpcPuppetTick)
+    mp_log("NPC-SYNC puppet tick started (" .. KCD2MP.npcSync.puppetTickMs .. "ms)")
+    Script.SetTimer(KCD2MP.npcSync.puppetTickMs, KCD2MP_NpcPuppetTick)
 end
 
 -- WO-27: verified entity removal.
@@ -2806,9 +3006,21 @@ function KCD2MP_SpawnGhost(id, x, y, z, rotZ)
         entity = System.GetEntityByName(name)
     end)
     if not entity then
-        System.LogAlways("[KCD2-MP] XGenAI spawn failed, fallback System.SpawnEntity")
+        -- Game Pass fork: XGenAIModule.SpawnEntity does not exist on the retail
+        -- build, and a plain "NPC" spawned through System.SpawnEntity carries a
+        -- full brain -- measured live, it walked 17 m off on its own in 18 s,
+        -- and as a ghost it fought the position stream and attacked the local
+        -- player when hit. The game's own NPC_NAI class ("null AI") is the
+        -- same body with no AI object: it stood still for 18 s and followed
+        -- the stream exactly. A peer's stand-in has a player behind it, so a
+        -- brain is only ever noise here.
+        local puppetClass = facePick.className
+        if puppetClass == "NPC" and not (XGenAIModule and XGenAIModule.SpawnEntity) then
+            puppetClass = "NPC_NAI"
+        end
+        System.LogAlways("[KCD2-MP] XGenAI spawn failed, fallback System.SpawnEntity class=" .. puppetClass)
         local ok2, e2 = pcall(System.SpawnEntity, {
-            class = facePick.className, position = pos, name = name,
+            class = puppetClass, position = pos, name = name,
             properties = { esFaction = "Civilians", guidSharedSoulId = facePick.guid },
         })
         if ok2 then entity = e2 end
@@ -2846,6 +3058,15 @@ function KCD2MP_SpawnGhost(id, x, y, z, rotZ)
         pcall(function() entity.actor:EquipClothingPreset(p.preset) end)
         pcall(function() entity.actor:EquipWeaponPreset(p.weapons) end)
     end
+    -- Game Pass fork: the player asked for peers to be a clone of their own
+    -- character. MakeLookAsActor copies the local player's look onto the
+    -- stand-in; mp_ghost_clone off keeps the preset armour above.
+    if KCD2MP.ghostCloneLook and player then
+        local okLook, errLook = pcall(function() entity.actor:MakeLookAsActor(player.id) end)
+        System.LogAlways("[KCD2-MP] clone look for ghost " .. tostring(id) .. " ok=" .. tostring(okLook)
+            .. (okLook and "" or (" err=" .. tostring(errLook))))
+    end
+
     local ghostName = name
     Script.SetTimer(800, function()
         pcall(function() System.ExecuteCommand("closeVisorOn " .. ghostName) end)
@@ -3003,6 +3224,24 @@ end
 
 -- Store name; if ghost already exists apply with short delay, else applied at spawn (1.5s).
 function KCD2MP_SetGhostName(id, name)
+    -- Host world: a peer named "[HOST]..." is a dedicated world host. Nobody
+    -- is playing it, so it gets no stand-in here, and its presence makes this
+    -- game a guest (KCD2MP_WorldRole).
+    if KCD2MP_IsWorldHostName(name) then
+        KCD2MP.ghostNames[id] = name
+        if not KCD2MP.worldHostIds[id] then
+            KCD2MP.worldHostIds[id] = true
+            if KCD2MP.ghosts[id] then
+                KCD2MP._hidingWorldHost = true
+                pcall(KCD2MP_RemoveGhost, id)
+                KCD2MP._hidingWorldHost = nil
+            end
+            if KCD2MP_WorldRole() == "guest" then KCD2MP.npcTracked = {} end
+            mp_log("WORLD-HOST peer " .. tostring(id) .. " '" .. tostring(name)
+                .. "' is the world host: hidden; this game is acting as " .. KCD2MP_WorldRole())
+        end
+        return
+    end
     -- WO-58: the agent re-asserts names on a slow cadence (a mid-connection
     -- game restart wipes this Lua state while the agent's relay session
     -- lives on, and nothing else re-delivers the name). Make the repeat
@@ -3291,6 +3530,7 @@ end
 -- ===== Ghost Update (called by server each packet) =====
 
 function KCD2MP_UpdateGhost(id, x, y, z, rotZ, isRiding)
+    if KCD2MP.worldHostIds[id] then return end   -- host world: the dedicated host has no stand-in
     local ghost = KCD2MP.ghosts[id]
 
     -- Spawn if doesn't exist yet, then fall through to process isRiding on same call.
@@ -3323,15 +3563,29 @@ function KCD2MP_UpdateGhost(id, x, y, z, rotZ, isRiding)
     -- making the dead-reckoning estimate oscillate between 0 and real --
     -- one direct cause of the reported rubber-banding. A burst packet now
     -- leaves the velocity estimate alone instead of dragging it to zero.
-    if dt > 0.005 and dt < 1.0 then
-        istate.vx = lerpVal(istate.vx or 0, ddx / dt, 0.5)
-        istate.vy = lerpVal(istate.vy or 0, ddy / dt, 0.5)
+    -- Game Pass fork: velocity is measured against a baseline at least
+    -- 0.12 s old instead of the previous packet. Over RemoteConsole the
+    -- calls run once per game frame, so packets sent ~125 ms apart can land
+    -- one frame apart and read 4x too fast (walk/run flipped 63 times a
+    -- minute, measured live). A packet inside the window only waits; the
+    -- next one then spans a real interval.
+    -- Typical gap between packets while this peer moves (bursts ignored).
+    if dt > 0.02 and dt < 0.5 then
+        istate.pktInterval = lerpVal(istate.pktInterval or 0.1, dt, 0.2)
+    end
+    local vbt = istate.velBaseT
+    if not vbt or (now - vbt) >= 1.0 then
+        if vbt then istate.vx, istate.vy, istate.vz = 0, 0, 0 end
+        istate.velBaseT, istate.velBaseX, istate.velBaseY, istate.velBaseZ = now, x, y, z
+    elseif (now - vbt) >= 0.12 then
+        local vdt = now - vbt
+        istate.vx = lerpVal(istate.vx or 0, (x - istate.velBaseX) / vdt, 0.5)
+        istate.vy = lerpVal(istate.vy or 0, (y - istate.velBaseY) / vdt, 0.5)
         -- Vertical rate, for jump detection (WO-38 Section A: a jumping
         -- player read as a stationary vertical teleport because animation
         -- selection only ever saw horizontal speed).
-        istate.vz = lerpVal(istate.vz or 0, ddz / dt, 0.5)
-    elseif dt >= 1.0 then
-        istate.vx, istate.vy, istate.vz = 0, 0, 0
+        istate.vz = lerpVal(istate.vz or 0, (z - istate.velBaseZ) / vdt, 0.5)
+        istate.velBaseT, istate.velBaseX, istate.velBaseY, istate.velBaseZ = now, x, y, z
     end
     istate.lastPacketX = x
     istate.lastPacketY = y
@@ -3343,6 +3597,7 @@ function KCD2MP_UpdateGhost(id, x, y, z, rotZ, isRiding)
     if jumpDist > 5.0 then
         istate.vx = 0
         istate.vy = 0
+        istate.velBaseT = nil
         mp_log(string.format("JUMP id=%s xyDist=%.2f vx/vy reset", id, jumpDist))
     elseif jumpDist > 2.0 then
         mp_log(string.format("JUMP id=%s xyDist=%.2f", id, jumpDist))
@@ -3916,6 +4171,22 @@ local COMBAT_IDLE_ANIMS = {
     "combat_rg_sz1_idle_lngsw_player",           -- CONFIRMED live 2026-08-18
     "combat_lg_sz0_idle_lngsw_player",           -- exists; reads shield-y (left guard)
 }
+-- Game Pass fork: real attack clips, played as an overlay.
+--
+-- The full swings are 1d- blendspaces, which StartAnimation cannot render --
+-- but each blendspace is built from ordinary example clips, and those play
+-- (all 21 longsword ones report a length on the ghost). What hid them, measured
+-- live on a null-AI ghost: a swing on layer 0 is restarted mid-clip by the
+-- actor's own animation state, and the weapon-drawn guard pose sits on layer 4
+-- and covers anything below it -- on layer 1 the clip ran to the end and only
+-- its sound came through. On layer 10 (above the guard, below the always-on
+-- layers 11 and 15) the player saw the swing.
+local REAL_SWING_ANIMS = {
+    "combat_rg_sz1_az2_natksw_medium_lngsw",     -- CONFIRMED live 2026-09-30 (the one the player picked)
+    "combat_lg_sz0_az0_natksw_medium_lngsw",
+}
+local REAL_SWING_LAYER = 10
+KCD2MP._realSwingAnim = nil    -- nil=not probed, false=none found, string=found
 KCD2MP._swingAnim = nil        -- nil=not probed, false=none found, string=found
 KCD2MP._blockAnim = nil
 KCD2MP._combatIdleAnim = nil
@@ -4096,6 +4367,22 @@ function KCD2MP_GhostCombat(id, evt)
             if ok then
                 if ghost.istate then ghost.istate.oneShotUntil = os.clock() + 1.0 end
                 return
+            end
+        end
+
+        -- Game Pass fork: a real attack clip on the overlay layer. No one-shot
+        -- hold -- the overlay does not fight the locomotion layer, so the
+        -- ghost keeps following its owner through the swing.
+        if evt == 2 then
+            if KCD2MP._realSwingAnim == nil then
+                KCD2MP._realSwingAnim = findAnim(ghost.entity, REAL_SWING_ANIMS) or false
+                mp_log("RealSwingAnim: " .. tostring(KCD2MP._realSwingAnim))
+            end
+            if KCD2MP._realSwingAnim then
+                local okSwing = pcall(function()
+                    ghost.entity:StartAnimation(0, KCD2MP._realSwingAnim, REAL_SWING_LAYER, 0.08, 1.0, false)
+                end)
+                if okSwing then return end
             end
         end
 
@@ -4311,6 +4598,19 @@ function KCD2MP_UpdateAnimation(id, ghost)
     if stance == "c" and speed > 4.0 then stance = "s" end
     local wantTag = calcAnimTag(speed, istate.animTag, stance)
 
+    -- Game Pass fork: a new locomotion tag must hold for 0.15 s before it
+    -- replaces the current one, so a single noisy speed sample cannot flip
+    -- walk/run/sprint and back within a few frames.
+    if istate.animTag and wantTag ~= istate.animTag then
+        local tnow = os.clock()
+        if istate.animPendingTag ~= wantTag then
+            istate.animPendingTag, istate.animPendingSince = wantTag, tnow
+        end
+        if tnow - istate.animPendingSince < 0.15 then wantTag = istate.animTag end
+    else
+        istate.animPendingTag = nil
+    end
+
     -- WO-38 Phase 3 (Section A): a jump used to render as a stationary
     -- vertical teleport, because this function only ever saw horizontal
     -- speed. While the interp tick reports the ghost airborne, play a jump
@@ -4523,17 +4823,45 @@ function KCD2MP_InterpTick(arg)
             -- visible step back. The projection now HOLDS at the DR_MAX
             -- point instead of reverting; the next real packet simply
             -- overwrites it.
+            -- Game Pass fork: real time, not tick counts. Script.SetTimer is
+            -- frame-bound, so a "20 ms" tick is really one or two frames, and
+            -- packets arrive ~100 ms apart, not 50. Measured live on a test
+            -- puppet walking a circle at 1.5 m/s: the old 60 ms projection
+            -- plus a 0.5-per-tick lerp covered each packet's step in the
+            -- first 60 ms and then stood still until the next one -- a
+            -- move-stop-move at packet rate, with the rendered speed reading
+            -- 0 between steps so the walk animation never played.
+            --
+            -- Now the target keeps moving at the measured velocity for as
+            -- long as a packet normally takes to arrive (pktInterval). A
+            -- packet that is late by half an interval means the peer stopped
+            -- -- the sender only sends on change -- so the lead then eases
+            -- back to the last real position instead of holding an overshoot
+            -- until the next heartbeat.
+            local nowT = os.clock()
+            local dtT = nowT - (istate.lastTickAt or (nowT - 0.020))
+            istate.lastTickAt = nowT
+            if dtT < 0.001 then dtT = 0.001 elseif dtT > 0.1 then dtT = 0.1 end
+
             local renderX = istate.tx or istate.cx
             local renderY = istate.ty or istate.cy
-            local DR_MAX = 3  -- 3 * 20ms = 60ms lookahead (covers 50ms packet gap)
-            local ticks = istate.ticksSincePacket or 0
-            if ticks >= 1 then
+            do
                 local vx = istate.vx or 0
                 local vy = istate.vy or 0
-                if math.sqrt(vx*vx + vy*vy) > 0.5 then
-                    local proj = math.min(ticks, DR_MAX)
-                    renderX = renderX + vx * (proj * 0.020)
-                    renderY = renderY + vy * (proj * 0.020)
+                if (vx*vx + vy*vy) > 0.25 then
+                    local gap = istate.pktInterval or 0.1
+                    if gap < 0.05 then gap = 0.05 elseif gap > 0.25 then gap = 0.25 end
+                    local age = nowT - (istate.lastPacketTime or nowT)
+                    local lead = 0
+                    if age <= 1.5 * gap then
+                        lead = math.min(age, gap)
+                    elseif age < 2.5 * gap then
+                        lead = 2.5 * gap - age
+                    else
+                        istate.vx, istate.vy = 0, 0
+                    end
+                    renderX = renderX + vx * lead
+                    renderY = renderY + vy * lead
                 end
             end
 
@@ -4545,13 +4873,18 @@ function KCD2MP_InterpTick(arg)
             -- overshoot), not the player actually moonwalking -- rendering it
             -- at full strength is the visible rubber-band. Forward and
             -- sideways corrections keep the responsive factor.
-            local factor = 0.5
+            -- Game Pass fork: time constants instead of per-tick fractions,
+            -- so the smoothing does not change with the frame rate. The
+            -- target already moves continuously, so the follow can be soft:
+            -- 0.1 s keeps every frame within 1.13-1.82 m/s on a 1.5 m/s walk
+            -- with 30 ms of packet jitter (0.03 s let it swing 0.48-2.53).
+            local factor = 1 - math.exp(-dtT / 0.1)
             local dxT = renderX - istate.cx
             local dyT = renderY - istate.cy
             local vxS = istate.vx or 0
             local vyS = istate.vy or 0
             if (vxS*vxS + vyS*vyS) > 0.25 and (dxT*vxS + dyT*vyS) < 0 then
-                factor = 0.15
+                factor = 1 - math.exp(-dtT / 0.2)
             end
             local prevCx = istate.cx
             local prevCy = istate.cy
@@ -4652,8 +4985,8 @@ function KCD2MP_InterpTick(arg)
                 -- Speed from rendered XY movement this tick
                 local movedDx = nx - prevCx
                 local movedDy = ny - prevCy
-                local rendSpeed = math.sqrt(movedDx*movedDx + movedDy*movedDy) / 0.020
-                istate.smoothedSpeed = lerpVal(istate.smoothedSpeed or 0, rendSpeed, 0.4)
+                local rendSpeed = math.sqrt(movedDx*movedDx + movedDy*movedDy) / dtT
+                istate.smoothedSpeed = lerpVal(istate.smoothedSpeed or 0, rendSpeed, 1 - math.exp(-dtT / 0.1))
 
                 if frozen then
                     -- WO-34 issue D: no animation on a corpse. Driving walk/run
@@ -5034,6 +5367,12 @@ end
 -- ===== Ghost Remove =====
 
 function KCD2MP_RemoveGhost(id)
+    -- Host world: the agent calls this when a peer disconnects, and that is
+    -- the only notice a hidden world host gives of leaving.
+    if KCD2MP.worldHostIds[id] and not KCD2MP._hidingWorldHost then
+        KCD2MP.worldHostIds[id] = nil
+        mp_log("WORLD-HOST peer " .. tostring(id) .. " left; this game is acting as " .. KCD2MP_WorldRole())
+    end
     local ghost = KCD2MP.ghosts[id]
     if not ghost then return end
     -- Remove horse ghost first (if riding)
@@ -5072,6 +5411,7 @@ function KCD2MP_RemoveGhost(id)
 end
 
 function KCD2MP_RemoveAllGhosts()
+    KCD2MP.worldHostIds = {}   -- host world: a lost relay session forgets the host too
     local count = 0
     for id, _ in pairs(KCD2MP.ghosts) do
         KCD2MP_RemoveGhost(id)
@@ -5969,7 +6309,10 @@ end
 -- both derived from the same hash so one name always resolves to one look.
 function KCD2MP_PickFaceForPlayer(nameKey)
     local h = KCD2MP_HashString(tostring(nameKey or ""))
-    local isFemale = (h % 2) == 0
+    -- Game Pass fork: every ghost is male -- the player asked for peers to
+    -- read as Henry-like men. Only this machine's view changes; the slot is
+    -- still picked from the same hash.
+    local isFemale = false
     local list = isFemale and KCD2MP.faceRoster.female or KCD2MP.faceRoster.male
     local idx = (math.floor(h / 2) % #list) + 1
     local pick = list[idx]
@@ -7014,6 +7357,8 @@ local ok, err = pcall(function()
     System.AddCCommand("mp_debug_hud",       'KCD2MP_DebugHud("%LINE")', "WO-50: toggle the CryEngine debug HUD (r_DisplayInfo), off by default in release: mp_debug_hud on|off")
 
     -- NPC sync (WO-32)
+    System.AddCCommand("mp_world_role",  'KCD2MP_SetWorldRole("%LINE")', "Host world: who decides where the NPCs are. host reports its neighbourhood, guest only displays, auto works it out: mp_world_role host|guest|auto")
+    System.AddCCommand("mp_world_host_follow", 'KCD2MP_SetWorldHostFollow("%LINE")', "Host world: a dedicated host's player follows the guests so its game simulates where they are: mp_world_host_follow on|off")
     System.AddCCommand("mp_npc_sync",    'KCD2MP_EnableNpcSync("%LINE")', "WO-32: stream nearby NPCs to peers (world authority only): mp_npc_sync on|off")
     System.AddCCommand("mp_npc_proximity", 'KCD2MP_EnableNpcProximity("%LINE")', "WO-60: non-authority claims NPCs near its own player (default on). off = pre-WO-60 host-only tracking: mp_npc_proximity on|off")
 

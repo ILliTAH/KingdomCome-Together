@@ -444,6 +444,12 @@ public partial class GameBridge(ClientConfig config)
 
     public async Task RunAsync(CancellationToken ct = default)
     {
+        if (config.UsesRemoteConsole)
+        {
+            await RunRemoteConsoleAsync(ct);
+            return;
+        }
+
         var http = new HttpGameTransport(config.GameApiBase);
         await http.StartAsync(ct);
         _transport = http;
@@ -464,6 +470,63 @@ public partial class GameBridge(ClientConfig config)
                 await _transport.DisposeAsync();
             await http.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Game Pass: the build has no debug HTTP API, so nothing on this path may
+    /// touch :1403. Lua goes in over RemoteConsole; state and events come out
+    /// through kcd.log.
+    /// </summary>
+    private async Task RunRemoteConsoleAsync(CancellationToken ct)
+    {
+        var sink = new RemoteConsoleLuaSink();
+        LogTailGameTransport tail;
+        try { tail = LogTailGameTransport.CreateWithoutReflection(sink, config.EmitIntervalMs); }
+        catch (FileNotFoundException ex)
+        {
+            Console.WriteLine($"[transport] {ex.Message}");
+            await sink.DisposeAsync();
+            return;
+        }
+
+        Console.WriteLine($"[transport] remoteconsole {sink.Endpoint} in, {tail.LogPath} out");
+        tail.GameEvent += OnGameEvent;
+        _transport = tail;
+        _discordPresence = new DiscordPresence(config);
+        try
+        {
+            await RunLoopAsync(null, ct);
+        }
+        finally
+        {
+            _discordPresence?.Dispose();
+            await tail.DisposeAsync();
+            await sink.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// (Re)starts the mod's emitter each time the game becomes ready -- a game
+    /// restarted under a running agent loses it, and the Lua side is idempotent.
+    /// </summary>
+    private async Task StartRemoteConsoleEmitterAsync(LogTailGameTransport tail, CancellationToken ct)
+    {
+        for (int attempt = 1; attempt <= 2 && !ct.IsCancellationRequested; attempt++)
+        {
+            long before = tail.FramesReceived;
+            tail.ResetEmitterStart();
+            await tail.StartAsync(ct);
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (tail.FramesReceived == before && DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+                await Task.Delay(50, ct);
+            if (tail.FramesReceived > before)
+            {
+                Console.WriteLine($"[transport] {tail.Name} via RemoteConsole — emitter running");
+                return;
+            }
+            Console.WriteLine("[transport] no emitter frames yet; re-issuing the emitter start");
+        }
+        Console.WriteLine("[transport] emitter produced no frames (is kdcmp in Documents\\kingdomcome_mods? look for '=== MOD INIT ===' in kcd.log)");
     }
 
     /// <summary>
@@ -536,7 +599,7 @@ public partial class GameBridge(ClientConfig config)
         return tail;
     }
 
-    private async Task RunLoopAsync(HttpGameTransport http, CancellationToken ct)
+    private async Task RunLoopAsync(HttpGameTransport? http, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -545,8 +608,10 @@ public partial class GameBridge(ClientConfig config)
 
             // Chosen after the game is up, because the log-tail probe needs the
             // mod running to answer.
-            if (ReferenceEquals(_transport, http))
+            if (http is not null && ReferenceEquals(_transport, http))
                 _transport = await SelectTransportAsync(http, ct);
+            else if (http is null && _transport is LogTailGameTransport rcTail)
+                await StartRemoteConsoleEmitterAsync(rcTail, ct);
 
             try
             {
@@ -1789,6 +1854,16 @@ public partial class GameBridge(ClientConfig config)
             return;
         }
 
+        // The reload also put the save's own weather back, and the change gate
+        // in ApplyWeatherAsync would keep the session's profile from being
+        // re-applied until the arbiter picks a different one (every 20
+        // minutes). Snap back to it now.
+        if (config.WeatherSyncEnabled && _lastAppliedWeatherProfile is string sessionWeather)
+        {
+            _lastAppliedWeatherProfile = null;
+            await ApplyWeatherAsync(sessionWeather, 1);
+        }
+
         uint candidate = preReloadTime;
         if (_peerWorldTimeUtc != DateTime.MinValue)
         {
@@ -2116,7 +2191,13 @@ public partial class GameBridge(ClientConfig config)
                 {
                     while (!cts.IsCancellationRequested)
                     {
-                        try { await _transport.ExecuteNowAsync("KCD2MP_InterpPump()", cts.Token); }
+                        try
+                        {
+                            await _transport.ExecuteNowAsync("KCD2MP_InterpPump()", cts.Token);
+                            // The HTTP round trip paces this loop; a RemoteConsole
+                            // send only queues, so pace it at the 20 ms interp tick.
+                            if (config.UsesRemoteConsole) await Task.Delay(20, cts.Token);
+                        }
                         catch (OperationCanceledException) { break; }
                         catch { /* a dropped frame is not worth stopping the pump for */ }
                         frames++;
@@ -2816,7 +2897,11 @@ public partial class GameBridge(ClientConfig config)
                     // Lua side still gets a call for the one-shot locomotion
                     // hold; everything else (draw/sheathe/block, or a swing
                     // with no native path available) stays on the old call.
+                    // Game Pass has no DLL: trying the pipe first cost a 500 ms
+                    // connect timeout per swing before the Lua cue ran, and the
+                    // hold below froze the ghost for a swing that never came.
                     if (ceEvent == Protocol.CombatEventSwing
+                        && !config.UsesRemoteConsole
                         && _ghostEntityIds.TryGetValue(ceSource.ToString(), out uint ceEntityId))
                     {
                         // No IsConnected pre-check: GhostSwingAsync connects the
@@ -2861,7 +2946,8 @@ public partial class GameBridge(ClientConfig config)
                         var items = new Guid[itemCount];
                         for (int i = 0; i < itemCount; i++)
                             items[i] = new Guid(payload.AsSpan(2 + i * Protocol.ItemClassLen, Protocol.ItemClassLen));
-                        _ = ApplyAppearanceAsync(sourceId, items, ct);
+                        if (_transport is not LogTailGameTransport { HasReflection: false })
+                            _ = ApplyAppearanceAsync(sourceId, items, ct);
                     }
                 }
                 else if (Interactions?.HandlePacket(type, payload) == true)

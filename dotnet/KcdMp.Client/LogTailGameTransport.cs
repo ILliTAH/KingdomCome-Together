@@ -8,9 +8,9 @@ namespace KcdMp.Client;
 /// agent tails it.
 ///
 /// Deliberately hybrid, because the log only runs one way. Outbound
-/// (agent to game) still needs the debug API, so an <see cref="HttpGameTransport"/>
-/// is composed for that; this class replaces only the *inbound* direction,
-/// which is where the cost was:
+/// (agent to game) goes through an <see cref="ILuaCommandSink"/> -- the debug
+/// API on the Modding Tools build, RemoteConsole on Game Pass -- and this class
+/// replaces only the *inbound* direction, which is where the cost was:
 ///
 ///   before: 3 HTTP round trips per sample, ~128 ms, 7.8 samples/s
 ///   after:  0 round trips -- reads whatever the emitter last pushed
@@ -72,7 +72,15 @@ public sealed class LogTailGameTransport : IGameTransport
     /// <summary>Events seen since start.</summary>
     public long EventsReceived { get; private set; }
 
-    private readonly HttpGameTransport _http;
+    private readonly ILuaCommandSink _sink;
+    private readonly IGameTransport? _reflection;
+    private readonly TaskCompletionSource _tailOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _readyReplies = new();
+    private int _noReflectionLogged;
+
+    /// <summary>False on a build with no debug API (Game Pass): appearance and soul reads answer "unknown".</summary>
+    public bool HasReflection => _reflection is not null;
+
     private readonly string _logPath;
     private readonly int _emitIntervalMs;
     private readonly CancellationTokenSource _cts = new();
@@ -107,9 +115,27 @@ public sealed class LogTailGameTransport : IGameTransport
     /// <summary>Reads come from cached push state, so none.</summary>
     public int RoundTripsPerStateRead => 0;
 
+    /// <summary>
+    /// Readiness probe reply, written by the probe itself (Game Pass has no
+    /// debug API to ask): <c>[KCD2-MP-RDY] &lt;nonce&gt; true|false</c>.
+    /// </summary>
+    public const string ReadyTag = "[KCD2-MP-RDY]";
+
+    /// <summary>How long a readiness probe waits for its own reply line.</summary>
+    public TimeSpan ReadyProbeTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
     public LogTailGameTransport(HttpGameTransport http, string logPath, int emitIntervalMs = 20)
+        : this(http, http, logPath, emitIntervalMs) { }
+
+    /// <param name="sink">Where Lua goes: the debug API, or RemoteConsole on Game Pass.</param>
+    /// <param name="reflection">
+    /// The debug API for appearance and soul reads and for readiness, or null
+    /// on a build that has none -- those reads then answer "unknown".
+    /// </param>
+    public LogTailGameTransport(ILuaCommandSink sink, IGameTransport? reflection, string logPath, int emitIntervalMs = 20)
     {
-        _http = http;
+        _sink = sink;
+        _reflection = reflection;
         _logPath = logPath;
         _emitIntervalMs = emitIntervalMs;
     }
@@ -127,6 +153,15 @@ public sealed class LogTailGameTransport : IGameTransport
         return new LogTailGameTransport(http, path, emitIntervalMs);
     }
 
+    /// <summary>For a build with no debug API (Game Pass): Lua through <paramref name="sink"/>, no reflection.</summary>
+    public static LogTailGameTransport CreateWithoutReflection(ILuaCommandSink sink, int emitIntervalMs = 20)
+    {
+        string path = KcdLogLocator.FindGamePass()
+            ?? throw new FileNotFoundException(
+                $"Could not find {KcdLogLocator.GamePassLogPath}. Start the game once first.");
+        return new LogTailGameTransport(sink, null, path, emitIntervalMs);
+    }
+
     public string LogPath => _logPath;
 
     /// <summary>
@@ -135,15 +170,15 @@ public sealed class LogTailGameTransport : IGameTransport
     /// </summary>
     public async Task StartAsync(CancellationToken ct = default)
     {
-        _tailTask ??= Task.Run(() => TailLoopAsync(_cts.Token), CancellationToken.None);
+        StartTail();
 
         if (!_emitterStarted)
         {
             // Flush explicitly: the HTTP transport batches by default, and a
             // buffered start command would sit unsent while we wait for frames
             // that can never arrive -- which reads exactly like a missing mod.
-            await _http.ExecuteAsync($"KCD2MP_StartEmitter({_emitIntervalMs})", ct);
-            await _http.FlushAsync(ct);
+            await _sink.ExecuteAsync($"KCD2MP_StartEmitter({_emitIntervalMs})", ct);
+            await _sink.FlushAsync(ct);
             _emitterStarted = true;
         }
     }
@@ -156,8 +191,57 @@ public sealed class LogTailGameTransport : IGameTransport
     /// </summary>
     public void ResetEmitterStart() => _emitterStarted = false;
 
+    private void StartTail() =>
+        _tailTask ??= Task.Run(() => TailLoopAsync(_cts.Token), CancellationToken.None);
+
     public Task<bool> IsGameReadyAsync(CancellationToken ct = default) =>
-        _http.IsGameReadyAsync(ct);
+        _reflection is not null ? _reflection.IsGameReadyAsync(ct) : ProbeReadyAsync(ct);
+
+    /// <summary>
+    /// Asks the game to log whether a player exists, tagged with a fresh nonce,
+    /// and waits for that exact line. The tail must already be open, or the
+    /// reply could land before the tail seeks to the end and be skipped.
+    /// </summary>
+    private async Task<bool> ProbeReadyAsync(CancellationToken ct)
+    {
+        StartTail();
+        try
+        {
+            await _tailOpened.Task.WaitAsync(ReadyProbeTimeout, ct);
+
+            // Two log lines, not one: the game writes the newline in front of
+            // each line, so the answer is only terminated -- and only then
+            // read by the tail -- once another line follows it. Before the
+            // emitter runs the log can be silent for seconds (seen live: the
+            // game answered "true" to every probe and none was ever read).
+            string nonce = Guid.NewGuid().ToString("N")[..12];
+            await _sink.ExecuteNowAsync(
+                $"System.LogAlways(\"{ReadyTag} {nonce} \"..tostring(player ~= nil)) System.LogAlways(\"{ReadyTag} {nonce} end\")", ct);
+
+            var deadline = DateTime.UtcNow + ReadyProbeTimeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (_readyReplies.TryRemove(nonce, out bool ready)) return ready;
+                await Task.Delay(25, ct);
+            }
+        }
+        catch (TimeoutException) { }
+        catch (OperationCanceledException) { }
+        return false;
+    }
+
+    private void ProcessReadyLine(ReadOnlySpan<char> rest)
+    {
+        int sp = rest.IndexOf(' ');
+        if (sp <= 0) return;
+        var value = rest[(sp + 1)..].Trim();
+        // Only a real answer counts: an echoed command line carries the Lua
+        // source here, not "true"/"false".
+        bool isTrue = value.SequenceEqual("true");
+        if (!isTrue && !value.SequenceEqual("false")) return;
+        if (_readyReplies.Count > 64) _readyReplies.Clear();
+        _readyReplies[rest[..sp].ToString()] = isTrue;
+    }
 
     public Task<PlayerState?> ReadPlayerStateAsync(CancellationToken ct = default)
     {
@@ -169,36 +253,39 @@ public sealed class LogTailGameTransport : IGameTransport
         }
     }
 
-    public Task ExecuteAsync(string lua, CancellationToken ct = default) =>
-        _http.ExecuteAsync(lua, ct);
+    public Task ExecuteAsync(string lua, CancellationToken ct = default) => _sink.ExecuteAsync(lua, ct);
 
-    public Task FlushAsync(CancellationToken ct = default) =>
-        _http.FlushAsync(ct);
+    public Task FlushAsync(CancellationToken ct = default) => _sink.FlushAsync(ct);
 
-    // Appearance (WO-9) has no push-based equivalent -- it always goes
-    // through the debug REST API regardless of which transport reads
-    // position, so these simply delegate to the composed HttpGameTransport
-    // exactly like ExecuteAsync/FlushAsync above.
+    public Task ExecuteNowAsync(string lua, CancellationToken ct = default) => _sink.ExecuteNowAsync(lua, ct);
+
+    // Appearance and soul reads (WO-9/17/40) exist only on the debug REST API.
+    // Without it (Game Pass) they answer "unknown", which every caller already
+    // treats as "skip this poll" (WO-59).
     public Task<Guid[]?> ReadEquippedItemClassesAsync(CancellationToken ct = default) =>
-        _http.ReadEquippedItemClassesAsync(ct);
+        _reflection?.ReadEquippedItemClassesAsync(ct) ?? NoReflection<Guid[]?>();
 
     public Task<Guid[]?> ReadGhostEquippedItemClassesAsync(string ghostSoulName, CancellationToken ct = default) =>
-        _http.ReadGhostEquippedItemClassesAsync(ghostSoulName, ct);
+        _reflection?.ReadGhostEquippedItemClassesAsync(ghostSoulName, ct) ?? NoReflection<Guid[]?>();
 
     public Task EquipItemOnGhostAsync(string ghostSoulName, Guid itemClass, bool createIfMissing, CancellationToken ct = default) =>
-        _http.EquipItemOnGhostAsync(ghostSoulName, itemClass, createIfMissing, ct);
+        _reflection?.EquipItemOnGhostAsync(ghostSoulName, itemClass, createIfMissing, ct) ?? NoReflection<bool>();
 
     public Task UnequipItemOnGhostAsync(string ghostSoulName, Guid itemClass, CancellationToken ct = default) =>
-        _http.UnequipItemOnGhostAsync(ghostSoulName, itemClass, ct);
+        _reflection?.UnequipItemOnGhostAsync(ghostSoulName, itemClass, ct) ?? NoReflection<bool>();
 
     public Task<Guid?> ReadGhostSoulGuidAsync(string ghostSoulName, CancellationToken ct = default) =>
-        _http.ReadGhostSoulGuidAsync(ghostSoulName, ct);
+        _reflection?.ReadGhostSoulGuidAsync(ghostSoulName, ct) ?? NoReflection<Guid?>();
 
     public Task<string?> ReadSoulNameByGuidAsync(Guid soulGuid, CancellationToken ct = default) =>
-        _http.ReadSoulNameByGuidAsync(soulGuid, ct);
+        _reflection?.ReadSoulNameByGuidAsync(soulGuid, ct) ?? NoReflection<string?>();
 
-    public Task ExecuteNowAsync(string lua, CancellationToken ct = default) =>
-        _http.ExecuteNowAsync(lua, ct);
+    private Task<T> NoReflection<T>()
+    {
+        if (Interlocked.Exchange(ref _noReflectionLogged, 1) == 0)
+            Console.WriteLine("[transport] no debug API on this build: appearance sync and soul lookups are off");
+        return Task.FromResult<T>(default!);
+    }
 
     /// <summary>
     /// Raised when the local player's aggregate pause-like state changes
@@ -329,6 +416,7 @@ public sealed class LogTailGameTransport : IGameTransport
                         fs.Seek(0, SeekOrigin.End); // only new lines matter
                         partial.Clear();
                         decoder.Reset();
+                        _tailOpened.TrySetResult();
                     }
                     catch
                     {
@@ -397,6 +485,13 @@ public sealed class LogTailGameTransport : IGameTransport
     /// </summary>
     private void ProcessLine(ReadOnlySpan<char> line)
     {
+        int rdyIdx = line.IndexOf(ReadyTag);
+        if (rdyIdx >= 0)
+        {
+            ProcessReadyLine(line[(rdyIdx + ReadyTag.Length)..].Trim());
+            return;
+        }
+
         int evtIdx = line.IndexOf(EventTag);
         if (evtIdx >= 0)
         {
@@ -538,8 +633,8 @@ public sealed class LogTailGameTransport : IGameTransport
             // as the start command.
             try
             {
-                await _http.ExecuteAsync("KCD2MP_StopEmitter()");
-                await _http.FlushAsync();
+                await _sink.ExecuteAsync("KCD2MP_StopEmitter()");
+                await _sink.FlushAsync();
             }
             catch { }
         }

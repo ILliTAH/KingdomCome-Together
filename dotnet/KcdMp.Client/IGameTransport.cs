@@ -44,7 +44,7 @@ public readonly record struct PlayerState(
 /// its most recent frame with no round trip at all. Callers see one method
 /// either way, so swapping the transport does not ripple outwards.
 /// </summary>
-public interface IGameTransport : IAsyncDisposable
+public interface IGameTransport : ILuaCommandSink, IAsyncDisposable
 {
     /// <summary>Short name for logs and benchmark output.</summary>
     string Name { get; }
@@ -64,18 +64,6 @@ public interface IGameTransport : IAsyncDisposable
     /// game is mid-load or otherwise not answering.
     /// </summary>
     Task<PlayerState?> ReadPlayerStateAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Runs a Lua statement in the game. Fire-and-forget: no value comes back.
-    /// A batching transport may buffer this until <see cref="FlushAsync"/>.
-    /// </summary>
-    Task ExecuteAsync(string lua, CancellationToken ct = default);
-
-    /// <summary>
-    /// Sends anything buffered by <see cref="ExecuteAsync"/>. A no-op for
-    /// transports that send immediately, so callers can always call it.
-    /// </summary>
-    Task FlushAsync(CancellationToken ct = default);
 
     /// <summary>
     /// The local player's currently-equipped item classes: armor (WO-9) and
@@ -140,21 +128,4 @@ public interface IGameTransport : IAsyncDisposable
     /// this build.
     /// </summary>
     Task<string?> ReadSoulNameByGuidAsync(Guid soulGuid, CancellationToken ct = default);
-
-    /// <summary>
-    /// Runs a Lua statement immediately, bypassing the batch buffer that
-    /// <see cref="ExecuteAsync"/> writes into.
-    ///
-    /// Exists for WO-13's interp pump, where the timing *is* the feature: the
-    /// batch is flushed by the agent's position loop, so a batched pump frame
-    /// would arrive a whole tick late, every tick. Use <see cref="ExecuteAsync"/>
-    /// for everything else -- one HTTP round trip per statement is exactly the
-    /// cost batching exists to avoid.
-    ///
-    /// This replaced WO-11's <c>SetTimeScaleAsync</c>, whose only caller was
-    /// the peer-slowdown response retired in WO-13. The underlying capability
-    /// is still real and documented in docs/WO-11-findings.md s0.4 if anything
-    /// ever needs it again; it just has no caller.
-    /// </summary>
-    Task ExecuteNowAsync(string lua, CancellationToken ct = default);
 }

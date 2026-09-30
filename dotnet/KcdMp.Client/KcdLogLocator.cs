@@ -37,6 +37,19 @@ public static partial class KcdLogLocator
         catch { return null; }
     }
 
+    /// <summary>
+    /// The Game Pass build's kcd.log, which it writes to Documents rather than
+    /// next to the game, or null when that file does not exist.
+    /// </summary>
+    public static string? FindGamePass()
+    {
+        string path = GamePassLogPath;
+        return File.Exists(path) ? path : null;
+    }
+
+    internal static string GamePassLogPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "kcd.log");
+
     /// <summary>Game install directories worth searching, across all Steam libraries.</summary>
     private static IEnumerable<string> CandidateDirectories()
     {

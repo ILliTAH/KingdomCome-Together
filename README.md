@@ -1,3 +1,10 @@
+> **This is a fork** of [DeepFriedDepp/KingdomCome-Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`, modified 2026-09-30. It adds two things:
+>
+> 1. **Xbox Game Pass players can join** a stock 0.18.2 session (the agent talks to the game over RemoteConsole instead of the Modding Tools debug API).
+> 2. **Host World** - one game decides where the NPCs are and every other player displays it, including a dedicated host machine.
+>
+> Start here: **[docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md)** (setup, what is tested and what is not) and **[docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md)** (every change, with the measurement behind it). The dedicated-host launcher has never been run on a Steam machine. Everything below this notice is the original 0.18.2 README. Same licence: GPLv3.
+
 <p align="center">
   <img src="docs/branding/kcd2-mp-logo.png" alt="KCD2 Multiplayer" width="220">
 </p>

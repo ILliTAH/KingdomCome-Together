@@ -36,4 +36,8 @@
     <Using Include="KcdMp.Wire" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="KcdMp.Client.Tests" />
+  </ItemGroup>
+
 </Project>

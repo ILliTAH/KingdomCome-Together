@@ -57,11 +57,16 @@ public sealed class ClientConfig
     ///               Needs the mod installed and loaded.
     ///   "http"    — poll the debug API. Always works, costs a round trip per
     ///               read, and hijacks sv_servername for yaw and mount state.
+    ///   "remoteconsole" — Game Pass: Lua over RemoteConsole (:4600, needs
+    ///               -devmode), state from kcd.log. Never touches :1403.
     ///
     /// Defaults to logtail, falling back to http automatically if kcd.log
     /// cannot be found or the emitter never produces a frame.
     /// </summary>
     public string Transport { get; set; } = "logtail";
+
+    [JsonIgnore]
+    public bool UsesRemoteConsole => Transport.Equals("remoteconsole", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Interval the mod's state emitter is asked to run at, in milliseconds.
