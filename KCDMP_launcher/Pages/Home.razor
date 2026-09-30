@@ -22,7 +22,7 @@
 <div class="content-wrapper">
 
     <div class="game-title">
-        Kingdom Come: Multiplayer
+        Kingdom Come: Co-op
     </div>
 
     <div class="main-window @(isFilterOpen ? "shifted" : "")">
@@ -68,6 +68,7 @@
                         LaunchStage.Injecting => "INJECTING...",
                         LaunchStage.Verifying => "VERIFYING...",
                         LaunchStage.Connected => "CONNECTED",
+                        LaunchStage.Started => "GAME STARTING",
                         LaunchStage.Failed => "CONNECT FAILED",
                         _ => ""
                     })
@@ -80,7 +81,7 @@
                         <button class="kcd-btn primary" @onclick="ConnectToGame">CONNECT</button>
                         <button class="kcd-btn" @onclick="CancelPendingConnect">CANCEL</button>
                     }
-                    else if (launchStage == LaunchStage.Connected || launchStage == LaunchStage.Failed)
+                    else if (launchStage == LaunchStage.Connected || launchStage == LaunchStage.Started || launchStage == LaunchStage.Failed)
                     {
                         <button class="kcd-btn primary" @onclick="ResetLaunchState">CLOSE</button>
                     }
@@ -96,7 +97,9 @@
                 Addresses="@hostLanAddresses"
                 ErrorMessage="@hostErrorMessage"
                 RelayRunning="@(hostedRelayProcess != null && !hostedRelayProcess.HasExited)"
+                CanWorldHost="@(GameInstalls.IsModdingToolsBuild(settings.GamePath))"
                 OnLaunchAsHost="@LaunchAsHost"
+                OnWorldHost="@LaunchWorldHost"
                 OnStopRelay="@(() => { StopHostedRelay(); showHostInfo = false; })"
                 OnClose="@(() => showHostInfo = false)" />
 

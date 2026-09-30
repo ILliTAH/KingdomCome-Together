@@ -75,12 +75,19 @@ if (args.Contains("--benchmark"))
     return await TransportBenchmark.RunAsync(config, benchCts.Token);
 }
 
+// A world host is recognised by its name, so it never takes the Steam name.
+if (config.WorldHost)
+    config.PlayerName = ClientConfig.WorldHostName(config.PlayerName);
+
 // An empty name means auto-detect.
 if (string.IsNullOrWhiteSpace(config.PlayerName))
     config.PlayerName =
         GetSteamNameFromKcdLog()     // primary: kcd.log written by KCD2's own Steam API
         ?? GetSteamPersonaName()     // fallback: loginusers.vdf
         ?? Environment.MachineName;  // last resort
+
+if (!config.WorldHost)
+    config.PlayerName = ClientConfig.OrdinaryPlayerName(config.PlayerName);
 
 // ---------------------------------------------------------------------------
 // Find all Steam library paths via libraryfolders.vdf, then look for

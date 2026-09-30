@@ -48,7 +48,15 @@ public partial class GameBridge(ClientConfig config)
 
     // Combat (WO-4): the channel to KCDMP.dll. Remote damage can only be
     // applied through native code, so this is the one path for it.
-    private readonly CombatPipe _combat = new();
+    private readonly CombatPipe _combat = new() { Disabled = config.UsesRemoteConsole };
+
+    /// <summary>
+    /// Host world: what a world host's agent sends on the re-arm cadence.
+    /// KCD2MP_AssertWorldHost does nothing while the role and the follow loop
+    /// are already as asked.
+    /// </summary>
+    internal static string WorldHostAssertLua(bool follow) =>
+        $"if KCD2MP_AssertWorldHost then KCD2MP_AssertWorldHost({(follow ? "true" : "false")}) end";
 
     /// <summary>
     /// Interaction sessions (WO-2). Dice and duelling hang off this rather than
@@ -371,15 +379,23 @@ public partial class GameBridge(ClientConfig config)
 
     /// <summary>
     /// WO-59: how often the last position is re-sent even when the player has
-    /// not moved (200 ticks x 10 ms = 2 s). Positions were purely
+    /// not moved. Positions were purely
     /// change-gated, which left a standing-still player unspawnable on any
     /// peer whose reload had just cleared the ghost row -- WO-38's
     /// "invisible after reload" candidate (a), now closed: Reconcile clears
     /// the stale row within 5 s and this heartbeat re-delivers the spawn
     /// trigger within 2 s more, moving or not. One 18-byte packet per 2 s
     /// of stillness is the whole cost.
+    ///
+    /// Host world: by the clock, not by loop ticks as it was (200 of them). A
+    /// tick is 10 ms only on paper -- Task.Delay(10) is about 15.6 ms on
+    /// Windows, and a host's tick also waits for an HTTP round trip -- and the
+    /// guests count the host as present by these packets.
     /// </summary>
-    private const int PositionHeartbeatEveryTicks = 200;
+    private static readonly TimeSpan PositionHeartbeatInterval = TimeSpan.FromSeconds(2);
+    private long _lastPositionSentAt;
+
+    internal static bool PositionHeartbeatDue(TimeSpan sinceLastSend) => sinceLastSend >= PositionHeartbeatInterval;
     // Reassigned per connection, same idiom as _combat.OnLocalHit: closes
     // over that connection's stream, so callers that don't have it
     // themselves (OnGameEvent, the tail transport's own event thread) can
@@ -1029,6 +1045,10 @@ public partial class GameBridge(ClientConfig config)
                         foreach (var kv in _ghostNames)
                             await ExecLuaAsync(
                                 $"if KCD2MP_SetGhostName then KCD2MP_SetGhostName(\"{kv.Key}\", \"{EscapeLua(kv.Value)}\") end");
+                        // Host world: a save load kills the mod's follow loop
+                        // and a game restart forgets the host role.
+                        if (config.WorldHost)
+                            await ExecLuaAsync(WorldHostAssertLua(config.WorldHostFollow));
                         // WO-59 Thread C: re-assert stimulus-deafness on every
                         // live ghost. AI.SetIgnorant was applied exactly once
                         // at spawn with its result discarded, so a failed call
@@ -1106,12 +1126,13 @@ public partial class GameBridge(ClientConfig config)
                         _voice.UpdateAllVolumes();
                     }
 
-                    bool posHeartbeat = tickCount % PositionHeartbeatEveryTicks == 0;
+                    bool posHeartbeat = PositionHeartbeatDue(System.Diagnostics.Stopwatch.GetElapsedTime(_lastPositionSentAt));
                     if (!_hasPushed || HasChanged(x, y, z, rotZ) || posHeartbeat)
                     {
                         bool moved = !_hasPushed || HasChanged(x, y, z, rotZ);
                         _hasPushed = true;
                         _lastX = x; _lastY = y; _lastZ = z; _lastRotZ = rotZ;
+                        _lastPositionSentAt = System.Diagnostics.Stopwatch.GetTimestamp();
                         await SendPositionAsync(stream, x, y, z, rotZ, riding);
                         if (moved)
                             Console.WriteLine($"[pos] {x:F1} {y:F1} {z:F1}  rot={rotZ:F2}  riding={riding}  read={sw.ElapsedMilliseconds}ms");
@@ -2588,6 +2609,9 @@ public partial class GameBridge(ClientConfig config)
                     byte ghostId = payload[0];
                     Console.WriteLine($"[disconnect] ghost {ghostId} removed");
                     _peerLastSeenUtc.TryRemove(ghostId, out _);
+                    // Host world: or the name re-assert above keeps telling
+                    // the mod that a departed "[HOST]" peer is still here.
+                    _ghostNames.TryRemove(ghostId, out _);
                     RefreshDiscordPeerCount();
                     _voice?.RemovePlayer(ghostId);
                     _ghostAppearance.TryRemove(ghostId, out _);
@@ -2788,7 +2812,8 @@ public partial class GameBridge(ClientConfig config)
                             bool npcKnown = _npcEntityIds.TryGetValue(npcName, out uint npcEntityId);
                             bool npcSwingNative = (nflags & 0x08) != 0
                                 && (nflags & 0x03) == 0
-                                && npcKnown;
+                                && npcKnown
+                                && !config.UsesRemoteConsole;   // no native plugin on Game Pass: keep the Lua cue
                             if (npcSwingNative) nflags &= 0xF7;
 
                             await ExecLuaAsync(string.Format(CultureInfo.InvariantCulture,

@@ -30,7 +30,9 @@
     // See Home.razor.cs's PollVersionMismatchAsync for how Message is built.
     [Parameter] public string Message { get; set; } = "";
 
-    private const string ReleasesUrl = "https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/releases";
+    // Host World fork: this fork's own releases -- the stock project's
+    // installer is a different program.
+    private const string ReleasesUrl = "https://github.com/ILliTAH/KingdomCome-Together/releases";
 
     private void OpenReleases() => UrlLauncher.Open(ReleasesUrl);
 }

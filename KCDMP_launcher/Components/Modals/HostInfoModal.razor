@@ -45,11 +45,32 @@
                     <div class="kcd-hint">Starting the relay...</div>
                 }
 
+                @if (CanWorldHost)
+                {
+                    <div class="kcd-hint" style="margin-bottom: 12px;">
+                        <b>Dedicated world host</b> (a machine nobody plays on): the game loads the skip save by
+                        itself, is minimised, and decides where the NPCs are for every player who joins this address.
+                        It keeps running after this launcher is closed. Needs a GPU.
+                    </div>
+                }
+
+                else
+                {
+                    <div class="kcd-hint" style="margin-bottom: 12px;">
+                        A dedicated world host (a machine nobody plays on) needs the Steam Modding Tools build on this
+                        machine; it was not found. Settings says what is missing.
+                    </div>
+                }
+
                 <div class="modal-actions">
                     @if (RelayRunning)
                     {
                         <button class="kcd-btn primary" @onclick="OnLaunchAsHost">START GAME</button>
                         <button class="kcd-btn danger" @onclick="OnStopRelay">STOP HOSTING</button>
+                    }
+                    @if (CanWorldHost)
+                    {
+                        <button class="kcd-btn" @onclick="OnWorldHost">RUN AS WORLD HOST</button>
                     }
                     <button class="kcd-btn" @onclick="CloseModalAsync">CLOSE</button>
                 </div>
@@ -67,4 +88,6 @@
     [Parameter] public bool RelayRunning { get; set; }
     [Parameter] public EventCallback OnLaunchAsHost { get; set; }
     [Parameter] public EventCallback OnStopRelay { get; set; }
+    [Parameter] public bool CanWorldHost { get; set; }
+    [Parameter] public EventCallback OnWorldHost { get; set; }
 }

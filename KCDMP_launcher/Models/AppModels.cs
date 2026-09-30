@@ -52,6 +52,24 @@ namespace KCDMP_launcher.Models
         // this at the base game produces a running game the agent cannot reach.
         public string GamePath { get; set; } = "";
 
+        // Host World fork: the Xbox Game Pass build's KingdomCome.exe
+        // (<drive>\<games folder>\Kingdom Come- Deliverance II\Content). It
+        // has no debug API and no plugin; the agent talks to it through the
+        // game's RemoteConsole instead (Start-GamePass.ps1).
+        public string GamePassPath { get; set; } = "";
+
+        // Which of the two Launch starts: "auto" (Steam when both are here),
+        // "steam" or "gamepass".
+        public string Platform { get; set; } = "auto";
+
+        // The name other players see. Empty lets the agent work it out (the
+        // Steam name, then the machine name).
+        public string PlayerName { get; set; } = "";
+
+        // Game Pass: the game loads the newest save by itself instead of
+        // waiting at the main menu (a line in user.cfg beside the game).
+        public bool AutoLoadLastSave { get; set; } = true;
+
         public string DllPath { get; set; } = "KCDMP.dll";
 
         // The agent. Launching the game and injecting the DLL is only half the

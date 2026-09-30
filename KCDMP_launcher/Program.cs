@@ -14,6 +14,20 @@ class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // settings.json, favourites and custom servers are bare relative
+        // names: they belong beside the launcher however it was started.
+        Environment.CurrentDirectory = AppContext.BaseDirectory;
+
+        // Host World fork: "--play host[:port]" joins without the window.
+        if (args.Length >= 2 && args[0] == "--play")
+        {
+            var (code, message) = KCDMP_launcher.Models.ScriptLauncher.QuickPlay(AppContext.BaseDirectory, args[1]);
+            if (code != 0)
+                System.Windows.Forms.MessageBox.Show(message, "KCD2 MP Launcher",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+            Environment.Exit(code);
+        }
+
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             // WO-39 (item J): Blazor's per-component render/init Debug lines
@@ -54,7 +68,11 @@ class Program
             var app = appBuilder.Build();
 
             app.MainWindow
-                .SetTitle("KCD2 MP Launcher")
+                // No colon: Photino makes a Start Menu shortcut named after the
+                // title (for notifications), and "Kingdom Come: Co-op.lnk" is not
+                // a file name -- Windows wrote an empty file "Kingdom Come" with
+                // the rest as a stream on it.
+                .SetTitle("Kingdom Come Co-op")
                 .SetSize(1600, 900)
                 .SetMaximized(true)
                 .SetResizable(true)

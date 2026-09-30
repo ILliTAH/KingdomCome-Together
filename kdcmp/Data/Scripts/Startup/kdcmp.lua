@@ -1883,13 +1883,22 @@ KCD2MP.npcSync = {
 --   1. mp_world_role host|guest says so outright. "host" is only ever set
 --      this way -- by the host machine's launcher. A player's machine never
 --      becomes a host by itself.
---   2. A peer whose name starts with "[HOST]" is in the session: that is the
---      dedicated host, so this game is a guest, and that peer's stand-in is
---      never shown.
---   3. Otherwise "peer": there is no host in the session and the mod behaves
---      as stock 0.18.2 (5 NPCs within 30 m, proximity claims).
+--   2. A peer whose name starts with "[HOST]" is in the session and its
+--      position packets are arriving: that is the dedicated host, so this
+--      game is a guest, and that peer's stand-in is never shown.
+--   3. Otherwise "peer": there is no host in the session and the mod tracks
+--      and claims NPCs as stock 0.18.2 does (5 within 30 m, by proximity).
 KCD2MP.worldRole = "auto"   -- "host" | "guest" | "auto"; mp_world_role sets it
-KCD2MP.worldHostIds = {}    -- ghost id -> true: peers named as a dedicated world host
+-- ghost id -> os.clock() of that world host's last position packet. The name
+-- alone does not say a host is there: the stock agent keeps a departed peer's
+-- name and sends it again every few seconds. So a name only enters the id at
+-- -math.huge ("known, not seen"), an id that has left goes back to that, and
+-- only a position packet puts a time there.
+KCD2MP.worldHostIds = {}
+-- The host's agent sends a position at least every 2 s, but a guest's agent
+-- can hand it to the game late; 30 s is far past anything but a host that is
+-- gone. A host that leaves cleanly is dropped at once (KCD2MP_RemoveGhost).
+KCD2MP.worldHostSilenceS = 30
 
 function KCD2MP_IsWorldHostName(name)
     return type(name) == "string" and string.sub(name, 1, 6) == "[HOST]"
@@ -1898,7 +1907,10 @@ end
 function KCD2MP_WorldRole()
     local r = KCD2MP.worldRole
     if r == "host" or r == "guest" then return r end
-    if next(KCD2MP.worldHostIds) then return "guest" end
+    local now = os.clock()
+    for _, seen in pairs(KCD2MP.worldHostIds) do
+        if now - seen < KCD2MP.worldHostSilenceS then return "guest" end
+    end
     return "peer"
 end
 
@@ -1929,7 +1941,8 @@ KCD2MP.worldHostFollow = {
     spread   = 30,      -- metres: guests farther apart than this are not one group
     everyMs  = 1000,
 }
-KCD2MP._worldHostFollowRunning = false
+KCD2MP._worldHostFollowGen = 0       -- the loop that may run; an older one stops itself
+KCD2MP._worldHostFollowAliveAt = nil
 
 -- Where the host should stand: the middle of the guests when they are
 -- together, otherwise the guest with the lowest id (so the choice is stable
@@ -1960,10 +1973,28 @@ function KCD2MP_WorldHostFollowTarget()
     return cx, cy, cz
 end
 
-function KCD2MP_WorldHostFollowTick()
-    if not KCD2MP._worldHostFollowRunning then return end
-    Script.SetTimer(KCD2MP.worldHostFollow.everyMs, KCD2MP_WorldHostFollowTick)  -- reschedule FIRST
-    if not KCD2MP.worldHostFollow.enabled or KCD2MP_WorldRole() ~= "host" or not player then return end
+-- A save load destroys the pending timer (see tickAlive), so "running" is a
+-- recent heartbeat, not a flag.
+function KCD2MP_WorldHostFollowAlive()
+    local at = KCD2MP._worldHostFollowAliveAt
+    return at ~= nil and (os.clock() - at) < 3 * KCD2MP.worldHostFollow.everyMs / 1000
+end
+
+function KCD2MP_StartWorldHostFollow()
+    KCD2MP._worldHostFollowGen = KCD2MP._worldHostFollowGen + 1
+    local gen = KCD2MP._worldHostFollowGen
+    KCD2MP._worldHostFollowAliveAt = os.clock()   -- prime it: the first tick is one interval away
+    local function tick()
+        if gen ~= KCD2MP._worldHostFollowGen or not KCD2MP.worldHostFollow.enabled then return end
+        Script.SetTimer(KCD2MP.worldHostFollow.everyMs, tick)  -- reschedule FIRST
+        KCD2MP._worldHostFollowAliveAt = os.clock()
+        KCD2MP_WorldHostFollowStep()
+    end
+    Script.SetTimer(KCD2MP.worldHostFollow.everyMs, tick)
+end
+
+function KCD2MP_WorldHostFollowStep()
+    if KCD2MP_WorldRole() ~= "host" or not player then return end
     pcall(function()
         local x, y, z = KCD2MP_WorldHostFollowTarget()
         if not x then return end
@@ -1986,14 +2017,27 @@ function KCD2MP_SetWorldHostFollow(arg)
             .. (KCD2MP.worldHostFollow.enabled and "on" or "off") .. ")")
         return false
     end
-    if KCD2MP.worldHostFollow.enabled and not KCD2MP._worldHostFollowRunning then
-        KCD2MP._worldHostFollowRunning = true
-        Script.SetTimer(KCD2MP.worldHostFollow.everyMs, KCD2MP_WorldHostFollowTick)
-    elseif not KCD2MP.worldHostFollow.enabled then
-        KCD2MP._worldHostFollowRunning = false
+    if KCD2MP.worldHostFollow.enabled then
+        if not KCD2MP_WorldHostFollowAlive() then KCD2MP_StartWorldHostFollow() end
+    else
+        KCD2MP._worldHostFollowAliveAt = nil   -- the loop stops itself at its next tick
     end
     mp_log("WORLD-HOST follow " .. (KCD2MP.worldHostFollow.enabled and "ON" or "off"))
     return true
+end
+
+-- The host machine's agent (--world-host) calls this on its re-arm cadence,
+-- every few seconds. A save load kills the follow loop and a game restart
+-- forgets the role, and nobody is sitting at a dedicated host to set either
+-- again. Does nothing while both are as asked.
+function KCD2MP_AssertWorldHost(follow)
+    if KCD2MP.worldRole ~= "host" then KCD2MP_SetWorldRole("host") end
+    local f = KCD2MP.worldHostFollow
+    if follow and not (f.enabled and KCD2MP_WorldHostFollowAlive()) then
+        KCD2MP_SetWorldHostFollow("on")
+    elseif not follow and f.enabled then
+        KCD2MP_SetWorldHostFollow("off")
+    end
 end
 KCD2MP.npcSyncRunning  = false
 KCD2MP._npcSyncAliveAt = nil
@@ -3059,7 +3103,7 @@ function KCD2MP_SpawnGhost(id, x, y, z, rotZ)
     end
     -- Game Pass fork: the player asked for peers to be a clone of their own
     -- character. MakeLookAsActor copies the local player's look onto the
-    -- stand-in; mp_ghost_clone off keeps the preset armour above.
+    -- stand-in; KCD2MP.ghostCloneLook = false keeps the preset armour above.
     if KCD2MP.ghostCloneLook and player then
         local okLook, errLook = pcall(function() entity.actor:MakeLookAsActor(player.id) end)
         System.LogAlways("[KCD2-MP] clone look for ghost " .. tostring(id) .. " ok=" .. tostring(okLook)
@@ -3228,8 +3272,10 @@ function KCD2MP_SetGhostName(id, name)
     -- game a guest (KCD2MP_WorldRole).
     if KCD2MP_IsWorldHostName(name) then
         KCD2MP.ghostNames[id] = name
-        if not KCD2MP.worldHostIds[id] then
-            KCD2MP.worldHostIds[id] = true
+        -- Known, not yet seen: its first position packet is what makes this
+        -- game a guest (KCD2MP_UpdateGhost).
+        if KCD2MP.worldHostIds[id] == nil then
+            KCD2MP.worldHostIds[id] = -math.huge
             if KCD2MP.ghosts[id] then
                 KCD2MP._hidingWorldHost = true
                 pcall(KCD2MP_RemoveGhost, id)
@@ -3237,9 +3283,15 @@ function KCD2MP_SetGhostName(id, name)
             end
             if KCD2MP_WorldRole() == "guest" then KCD2MP.npcTracked = {} end
             mp_log("WORLD-HOST peer " .. tostring(id) .. " '" .. tostring(name)
-                .. "' is the world host: hidden; this game is acting as " .. KCD2MP_WorldRole())
+                .. "' is named as the world host: hidden")
         end
         return
+    end
+    -- An ordinary name for an id that was a world host: the host left and
+    -- another player was given its id. That player gets a stand-in.
+    if KCD2MP.worldHostIds[id] ~= nil then
+        KCD2MP.worldHostIds[id] = nil
+        mp_log("WORLD-HOST id " .. tostring(id) .. " now belongs to '" .. tostring(name) .. "'")
     end
     -- WO-58: the agent re-asserts names on a slow cadence (a mid-connection
     -- game restart wipes this Lua state while the agent's relay session
@@ -3529,7 +3581,16 @@ end
 -- ===== Ghost Update (called by server each packet) =====
 
 function KCD2MP_UpdateGhost(id, x, y, z, rotZ, isRiding)
-    if KCD2MP.worldHostIds[id] then return end   -- host world: the dedicated host has no stand-in
+    if KCD2MP.worldHostIds[id] then
+        -- Host world: the dedicated host has no stand-in; its packets only
+        -- say that it is still there.
+        local unseen = KCD2MP.worldHostIds[id] == -math.huge
+        KCD2MP.worldHostIds[id] = os.clock()
+        if unseen then
+            mp_log("WORLD-HOST peer " .. tostring(id) .. " is reporting; this game is acting as " .. KCD2MP_WorldRole())
+        end
+        return
+    end
     local ghost = KCD2MP.ghosts[id]
 
     -- Spawn if doesn't exist yet, then fall through to process isRiding on same call.
@@ -5369,7 +5430,7 @@ function KCD2MP_RemoveGhost(id)
     -- Host world: the agent calls this when a peer disconnects, and that is
     -- the only notice a hidden world host gives of leaving.
     if KCD2MP.worldHostIds[id] and not KCD2MP._hidingWorldHost then
-        KCD2MP.worldHostIds[id] = nil
+        KCD2MP.worldHostIds[id] = -math.huge   -- gone until it reports a position again
         mp_log("WORLD-HOST peer " .. tostring(id) .. " left; this game is acting as " .. KCD2MP_WorldRole())
     end
     local ghost = KCD2MP.ghosts[id]

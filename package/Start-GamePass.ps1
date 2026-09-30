@@ -1,17 +1,30 @@
 # Kingdom Come: Together 0.18.2 - Xbox Game Pass player (guest).
 #
+# The launcher (JOIN SERVER) runs this for a Game Pass player. By hand:
 #   Start-GamePass.bat                          uses relay.txt next to this script
 #   Start-GamePass.bat -RelayHost 1.2.3.4       or say where the relay is
+#   Start-GamePass.bat -NoAutoLoad              stop at the main menu instead of loading your last save
 #
 # relay.txt holds one line, "host" or "host:port". It is created the first time
 # you answer the prompt below, and is never part of the download.
+[CmdletBinding()]
 param(
     [string] $RelayHost  = '',
     [int]    $RelayPort  = 0,
-    [string] $PlayerName = $env:USERNAME,
-    [string] $GameExe    = ''
+    [string] $PlayerName = '',          # empty: the agent picks (Steam name, then the PC's name) - not the Windows account name
+    [string] $GameExe    = '',
+    [switch] $NoAutoLoad,
+    [switch] $PauseOnError              # the launcher passes this
 )
 $ErrorActionPreference = 'Stop'
+# Started from the launcher, this window is the only place an error shows, and
+# it would close with the error in it.
+trap {
+    Write-Host ''
+    Write-Host "ERROR: $_" -ForegroundColor Red
+    if ($PauseOnError) { Read-Host 'Press Enter to close' | Out-Null }
+    exit 1
+}
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $here 'KcdmpCommon.ps1')
 
@@ -49,13 +62,22 @@ if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue))
 
 # 2. Mod, then the game with -devmode - unless it is already running with it.
 $modDir = Get-GamePassModDir
-if (-not (Test-GameRunning)) {
+$startedGame = -not (Test-GameRunning)
+if ($startedGame) {
     Install-Mod $modDir
 
     $exe = $GameExe
     if (-not $exe) { $exe = Find-GamePassExe }
     if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
         throw 'Could not find the Game Pass KingdomCome.exe. Pass it with -GameExe "<...>\Content\KingdomCome.exe".'
+    }
+    # The game loads the newest save by itself instead of waiting at the main
+    # menu. This build has no command that loads a save by name, so "newest"
+    # is the only choice there is.
+    try { Set-AutoLoadLastSave $exe (-not $NoAutoLoad) }
+    catch {
+        Write-Warning "Could not write user.cfg next to the game ($($_.Exception.Message)). Load your save by hand."
+        $NoAutoLoad = $true
     }
     Write-Host "Starting the game with -devmode: $exe"
     Start-Process -FilePath $exe -ArgumentList '-devmode' -WorkingDirectory (Split-Path $exe)
@@ -73,5 +95,11 @@ while (-not (Test-RemoteConsole)) {
 }
 
 # 3. Run the agent. It connects to the relay once a save is loaded.
-Write-Host "Load your save in the game. Connecting to ${RelayHost}:$RelayPort as $PlayerName."
-& (Join-Path $here 'agent\KcdMpClient.exe') --host $RelayHost --port $RelayPort --name $PlayerName --transport remoteconsole
+if ($startedGame -and -not $NoAutoLoad) { Write-Host 'The game loads your last save by itself.' } else { Write-Host 'Load your save in the game.' }
+Write-Host "Connecting to ${RelayHost}:$RelayPort."
+$agentArgs = @('--host', $RelayHost, '--port', $RelayPort, '--transport', 'remoteconsole')
+if ($PlayerName.Trim()) { $agentArgs += '--name', $PlayerName.Trim() }
+& (Find-PackageExe 'KcdMpClient.exe') @agentArgs
+# The agent's own errors (a relay on another protocol version, say) are an exit
+# code, not a PowerShell error: without this the window closed on them.
+if ($LASTEXITCODE) { throw "The agent stopped with exit code $LASTEXITCODE. Its last lines above say why." }

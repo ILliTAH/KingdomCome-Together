@@ -1,57 +1,77 @@
-# Kingdom Come: Together 0.18.2 — Host World fork (ชุดเดียว ใช้ได้ทุกเครื่อง)
+# Kingdom Come: Co-op (fork ของ Kingdom Come: Together 0.18.2)
+
+ตัวติดตั้งเดียว ใช้ได้ทุกเครื่อง **ไม่ต้องลง KCDMP ตัวเดิมหรือม็อดอื่นก่อน** — ในนี้มีครบ: launcher, agent, relay, native plugin, ม็อดของเกม และเซฟข้ามบทนำ
 
 เพิ่มจาก KCDMP 0.18.2 ตัวเดิม: **ผู้เล่น Xbox Game Pass เข้าเล่นได้** และ **Host World** (เครื่องเซิร์ฟเวอร์แยกที่ไม่มีคนเล่น เป็นโลกกลางกำหนดตำแหน่ง NPC ให้ผู้เล่นทุกคน)
 
-## ติดตั้ง
+## เล่น
 
-แตก zip แล้วดับเบิลคลิก **`Setup.bat`** — มันจะบอกว่าเจอเกมแบบไหนในเครื่อง แล้วให้เลือก:
+1. เปิด **Kingdom Come Co-op** (ไอคอนบนเดสก์ท็อป) — launcher หาเกมในเครื่องเอง ทั้ง Xbox Game Pass และ Steam (Modding Tools)
+2. กด **ADD SERVER** ใส่ที่อยู่เครื่องที่เปิดเซิร์ฟเวอร์ (เช่น `1.2.3.4` พอร์ต `7778`)
+3. เลือกเซิร์ฟเวอร์ แล้วกด **JOIN SERVER**
 
-| เลือก | ใช้กับ | ทำอะไร |
-|---|---|---|
-| **1** Play on Xbox Game Pass | ผู้เล่น Game Pass | ติดตั้งม็อด เปิดเกม แล้วต่อเซิร์ฟเวอร์ให้ |
-| **2** Install the mod for Steam | ผู้เล่น Steam | วางไฟล์ม็อดลง Modding Tools จากนั้นเล่นผ่าน KCDMP Launcher ตามเดิม |
-| **3** Run this machine as WORLD HOST | เครื่องเซิร์ฟเวอร์ (Steam) — **ไม่ใช่เครื่องที่ใช้เล่น** | เปิด relay + เกม + agent ให้เครื่องนี้เป็นโลกกลาง |
+**ทุกเครื่องในเซสชันต้องใช้ตัวติดตั้งจาก release เดียวกัน** ปิดเกมก่อนกด JOIN ทุกครั้ง
 
-**ทุกเครื่องต้องใช้ชุดเดียวกัน (release เดียวกัน)** ปิดเกมก่อนรันทุกครั้ง
+### ผู้เล่น Xbox Game Pass
+- กด JOIN แล้วไม่ต้องทำอะไรต่อ: launcher วางม็อดลงเกม เปิดเกม **เกมโหลดเซฟล่าสุดเอง** แล้วต่อเซิร์ฟเวอร์
+- หน้าต่าง console ที่เปิดขึ้นคือ agent — เปิดค้างไว้ตลอดที่เล่น ขึ้น `Game ready!` แล้ว `Connected!` คือใช้ได้
+- ครั้งแรกมีหน้าต่าง UAC ให้กด **Yes** หนึ่งครั้ง — สร้างกฎ firewall บล็อกเครื่องอื่นไม่ให้เข้าพอร์ต 4600 ของเกม
+- การโหลดเซฟเองทำงานด้วยบรรทัด `wh_sys_AutoLoadLastSave = 1` ใน `user.cfg` ข้างตัวเกม จึงมีผลกับการเปิดเกมทุกครั้ง
+  ปิดได้ที่ Settings (F10) → "Load my last save automatically" (บรรทัดอื่นใน `user.cfg` ไม่ถูกแตะ) ถอนการติดตั้งก็ลบบรรทัดนี้ให้
+- เกม Game Pass ไม่มีคำสั่งโหลดเซฟตามชื่อ จึงเลือกได้แค่ "เซฟล่าสุด"
 
-### 1 — ผู้เล่น Game Pass
-- ครั้งแรกจะถาม**ที่อยู่ relay** (เช่น `1.2.3.4` หรือ `1.2.3.4:7778`) แล้วจำไว้ใน `relay.txt`
-- ครั้งแรกมีหน้าต่าง UAC ให้กด **Yes** — สร้างกฎ firewall บล็อกเครื่องอื่นไม่ให้เข้าพอร์ต 4600 ของเกม
-- โหลดเซฟในเกม → หน้าต่าง agent ขึ้น `Game ready!` แล้ว `Connected!`
-- ครั้งต่อไปใช้ `Start-GamePass.bat` ได้เลย (เปลี่ยนชื่อ: `Start-GamePass.bat -PlayerName Henry`)
+### ผู้เล่น Steam
+- ต้องมี KCD2 และ **KCD2 Modding Tools** (ฟรีใน Steam library) และเคยเปิด Modding Tools หนึ่งครั้งให้ตั้งค่าเสร็จ
+- กด JOIN → launcher วางม็อดลง `<Modding Tools>\Mods\kdcmp\` และวาง**เซฟข้ามบทนำ**เป็น
+  `Saved Games\kingdomcome2\saves\playline0\kcdmpskip.whs` (เลือกได้จากเมนู Load; เซฟของคุณเองไม่ถูกแตะ) แล้วเปิดเกม
+- โหลดเซฟ พอเดินได้แล้วกด **CONNECT** ใน launcher — ขั้นตอนเดียวกับ launcher ต้นฉบับ
 
-### 2 — ผู้เล่น Steam
-- ต้องมี KCD2 + **KCD2 Modding Tools** และติดตั้ง **KCDMP 0.18.2** ตัวเดิมไว้แล้ว
-- ตัวติดตั้งวาง `mod.manifest` กับ `Data\kdcmp.pak` ลง `<Modding Tools>\Mods\kdcmp\`
-- กลับไปใช้ของเดิม: ติดตั้ง `KCDMP-Setup-0.18.2.exe` ทับ
-
-### 3 — เครื่องเซิร์ฟเวอร์ (โลกกลาง)
-- ต้องมี Steam + KCD2 + Modding Tools บนเครื่องนั้น และเปิดพอร์ต TCP 7778 ขาเข้า
-- สคริปต์เปิด relay, เปิดเกม, รอให้โหลดเซฟ แล้วประกาศตัวเป็นโฮสต์ในชื่อ `[HOST] world`
-- **ส่วนนี้ยังไม่เคยรันกับเกมจริง** — อ่าน `HOST-WORLD-GUIDE.md` ก่อน มีรายการตรวจสอบและความเสี่ยงครบ
+### เปิดเซิร์ฟเวอร์
+- **เล่นไปด้วย**: HOST GAME → START GAME — เปิด relay บนเครื่องนี้ และบอกที่อยู่ที่ต้องส่งให้เพื่อน
+- **เครื่องเซิร์ฟเวอร์ที่ไม่มีคนเล่น (โลกกลาง)**: HOST GAME → RUN AS WORLD HOST (เครื่อง Steam เท่านั้น)
+  - เปิด relay, เปิดเกม, **โหลดเซฟข้ามเอง**, ย่อหน้าต่างเกม แล้วประกาศตัวเป็นโฮสต์ในชื่อ `[HOST] world` ไม่ต้องมีใครกดอะไร
+  - หน้าต่าง console ที่เปิดขึ้นคือ console ของเซิร์ฟเวอร์ ปิด launcher ได้ แต่อย่าปิด console
+  - KCD2 ไม่มีโปรแกรม dedicated server แบบ Arma: โฮสต์คือตัวเกมที่ย่อหน้าต่างไว้ **เครื่องต้องมี GPU**
+  - รันตรง ๆ ก็ได้: `Start-WorldHost.bat` ในโฟลเดอร์นี้ ตัวเลือก: `-Save <ชื่อ> -Playline <0-4>`, `-NoAutoLoad`, `-ShowWindow`,
+    `-MaxFps 30`, `-Window 640x360`, `-NoFollow`, `-NoInject`, `-NoRelay`
+  - เปิดพอร์ต TCP 7778 ขาเข้า
+  - **ส่วนนี้ยังไม่เคยรันกับเกมจริง** — อ่าน `HOST-WORLD-GUIDE.md` ก่อน มีรายการตรวจสอบและความเสี่ยงครบ
 
 ## สิ่งที่ใช้ได้ / ใช้ไม่ได้
 
-| ทดสอบกับเกมจริงแล้ว (ฝั่ง Game Pass) | ทดสอบด้วยชุดเทสต์เท่านั้น | ใช้ไม่ได้บน Game Pass |
+| ทดสอบกับเกมจริงแล้ว (ฝั่ง Game Pass) | ทดสอบด้วยชุดเทสต์เท่านั้น / ยังไม่เคยรัน | ใช้ไม่ได้บน Game Pass |
 |---|---|---|
-| เห็นเพื่อนเดิน วิ่ง ฟัน (ตัวแทนไม่มี AI ไม่เดินเอง) | Host World: โฮสต์ / ผู้เล่น / ซ่อนตัวละครโฮสต์ | ชุดเกราะ/อาวุธของเพื่อนไม่ sync |
-| ส่งตำแหน่ง เลือด stamina ของเรา | NPC ที่ sync มาเคลื่อนที่ต่อเนื่อง ถือไว้ 8 วินาที | ความเสียหาย/การตายของ NPC ข้ามเครื่อง |
-| สภาพอากาศตามเซสชัน รวมถึงหลังโหลดเซฟ | โฮสต์ย้ายตามผู้เล่น | ฟีเจอร์ที่ต้องใช้ native plugin |
+| ตัวติดตั้ง + launcher: กด JOIN แล้วเกมเปิด โหลดเซฟเอง ต่อเซิร์ฟเวอร์ | ฝั่ง Steam ทั้งหมดของ launcher นี้ (วางม็อด, plugin ที่ build ใหม่) | ชุดเกราะ/อาวุธของเพื่อนไม่ sync |
+| เห็นเพื่อนเดิน วิ่ง ฟัน (ตัวแทนไม่มี AI ไม่เดินเอง) | Host World: โฮสต์ / ผู้เล่น / ซ่อนตัวละครโฮสต์ | ความเสียหาย/การตายของ NPC ข้ามเครื่อง |
+| ส่งตำแหน่ง เลือด stamina ของเรา | NPC ที่ sync มาเคลื่อนที่ต่อเนื่อง ถือไว้ 8 วินาที | ฟีเจอร์ที่ต้องใช้ native plugin |
+| สภาพอากาศตามเซสชัน รวมถึงหลังโหลดเซฟ | เครื่องโฮสต์: โหลดเซฟเอง / ย่อหน้าต่าง / โฮสต์ย้ายตามผู้เล่น | โหลดเซฟตามชื่อ |
 
 ข้อจำกัดของ Host World: ผู้เล่นต้องอยู่บริเวณเดียวกับโฮสต์ (ราว 60 ม.), กิจกรรมของ NPC (นั่ง ทำงาน) ไม่ถูกส่ง,
 เควส บทสนทนา ร้านค้า หีบ ยังเป็นของใครของมัน
 
 ## ถ้ามีปัญหา
 
-- **`The game is already running without -devmode`** → ปิดเกม แล้วรันใหม่
-- **`The game is running with a different version of the mod`** → ปิดเกม แล้วรันใหม่ให้สคริปต์วางม็อดตัวใหม่
-- **ไม่ขึ้น `Game ready!`** → ต้องโหลดเซฟและยืนอยู่ในโลกเกม; ดู `Documents\kcd.log` (Game Pass) ว่ามี `=== MOD INIT ===`
-- **ต่อ relay ไม่ได้** → ตรวจ `relay.txt` และว่า relay เปิดอยู่
-- **หาเกมไม่เจอ** → ใส่เอง: `Start-GamePass.bat -GameExe "<...>\Content\KingdomCome.exe"` หรือ `Start-WorldHost.bat -GameExe "<...>\KingdomCome.exe"`
+- **launcher บอกว่าหาเกมไม่เจอ** → หน้า Settings (F10) บอกว่าขาดอะไร:
+  - *"Steam is here, but the KCD2 Modding tools are not installed"* = เครื่องมีแค่เกมปกติ ม็อดนี้รันบนเกมปกติของ Steam ไม่ได้
+    กด **GET THE MODDING TOOLS ON STEAM** (ฟรี อยู่ใน Library → ตัวกรอง Tools) ลงเสร็จเปิดผ่าน Steam หนึ่งครั้ง แล้วกด **LOOK AGAIN**
+  - *"Steam lists the KCD2 Modding tools, but their files are not on disk"* = ยังดาวน์โหลดไม่เสร็จ
+  - หรือกด BROWSE ใส่ path เอง: Steam = `...\steamapps\common\KCD2Mod\Bin\Win64ReleaseSteamLTO_DLL\KingdomCome.exe`,
+    Game Pass = `...\Kingdom Come- Deliverance II\Content\KingdomCome.exe`
+- **`The game is already running without -devmode`** (Game Pass) → ปิดเกม แล้วกด JOIN ใหม่
+- **`The game is running with a different version of the mod`** → ปิดเกม แล้วกด JOIN ใหม่ให้ม็อดถูกวางใหม่
+- **ไม่ขึ้น `Game ready!`** → ต้องมีเซฟที่โหลดแล้วและยืนอยู่ในโลกเกม; ดู `Documents\kcd.log` (Game Pass) ว่ามี `=== MOD INIT ===`
+- **Server is unreachable** → ตรวจที่อยู่/พอร์ต และว่าเครื่องเซิร์ฟเวอร์เปิด relay อยู่
+- ข้อความ error ของ agent/สคริปต์อยู่ในหน้าต่าง console; ของ launcher อยู่ที่ `%APPDATA%\KCDMP_Launcher\app*.log`
 
 ## ความปลอดภัย
 
 `-devmode` ทำให้เกม Game Pass เปิดพอร์ต 4600 ที่ไม่มีรหัสผ่าน กฎ firewall ข้างบนบล็อกเครื่องอื่นไว้
 บนเครื่องเซิร์ฟเวอร์ เปิดออกนอกเครื่องเฉพาะ TCP 7778 — ห้ามเปิด `:1403` หรือ `:4600`
 
-Source และรายละเอียด: ดู `HOST-WORLD-GUIDE.md` · License GPLv3
+## ถอนการติดตั้ง
+
+Settings ของ Windows → Apps → **Kingdom Come Co-op** → Uninstall
+ตัวถอนลบบรรทัดโหลดเซฟเองออกจาก `user.cfg` ของเกม และถามก่อนว่าจะลบม็อดออกจากเกมด้วยไหม
+ที่เหลือไว้: เซฟข้าม (`kcdmpskip.whs`) และกฎ firewall (บล็อกอย่างเดียว ลบได้ใน Windows Defender Firewall ชื่อ `KCDMP GamePass - block RemoteConsole 4600`)
+
+Source และรายละเอียด: https://github.com/ILliTAH/KingdomCome-Together · License GPLv3 (`LICENSE.txt`)

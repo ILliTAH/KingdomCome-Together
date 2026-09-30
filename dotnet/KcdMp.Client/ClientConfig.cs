@@ -118,6 +118,45 @@ public sealed class ClientConfig
     /// </summary>
     public bool IsHosting { get; set; } = false;
 
+    /// <summary>
+    /// Host world: this agent's game is the dedicated world host (--world-host,
+    /// passed by Start-WorldHost.ps1). The agent keeps telling the mod so,
+    /// because a save load or a game restart makes the mod forget and nobody
+    /// is sitting at a dedicated host. Command line only, never the config
+    /// file: a player's machine must not become a host by itself.
+    /// </summary>
+    [JsonIgnore]
+    public bool WorldHost { get; set; } = false;
+
+    /// <summary>
+    /// Host world: whether the host's player is moved after the guests
+    /// (--no-world-follow turns it off).
+    /// </summary>
+    [JsonIgnore]
+    public bool WorldHostFollow { get; set; } = true;
+
+    /// <summary>The prefix every other game recognises a world host by.</summary>
+    public const string WorldHostPrefix = "[HOST]";
+
+    /// <summary>
+    /// The name a player connects under: never with the prefix. Every other
+    /// game would take that player for the host and not show them.
+    /// </summary>
+    public static string OrdinaryPlayerName(string name)
+    {
+        name = name.Trim();
+        while (name.StartsWith(WorldHostPrefix, StringComparison.Ordinal))
+            name = name[WorldHostPrefix.Length..].TrimStart();
+        return name.Length == 0 ? "Player" : name;
+    }
+
+    /// <summary>The name a world host connects under: always with the prefix.</summary>
+    public static string WorldHostName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return WorldHostPrefix + " world";
+        return name.StartsWith(WorldHostPrefix, StringComparison.Ordinal) ? name : $"{WorldHostPrefix} {name}";
+    }
+
     [JsonIgnore]
     public static string DefaultPath =>
         Path.Combine(
@@ -257,6 +296,12 @@ public sealed class ClientConfig
                         break;
                     case "--hosting":
                         IsHosting = true;
+                        break;
+                    case "--world-host":
+                        WorldHost = true;
+                        break;
+                    case "--no-world-follow":
+                        WorldHostFollow = false;
                         break;
                     case "--benchmark":
                         // Handled in Program before the agent starts; listed

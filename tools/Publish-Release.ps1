@@ -35,7 +35,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 
-if (-not $env:DOTNET_ROOT) {
+# A side-by-side SDK in the user profile, where there is one; otherwise the
+# dotnet on PATH.
+if (-not $env:DOTNET_ROOT -and (Test-Path "$env:USERPROFILE\.dotnet-sdk8")) {
     $env:DOTNET_ROOT = "$env:USERPROFILE\.dotnet-sdk8"
     $env:PATH = "$env:DOTNET_ROOT;$env:PATH"
 }
@@ -100,6 +102,19 @@ if (-not (Test-Path $nativeDll) -or -not (Test-Path $nativeInjector)) {
 }
 Copy-Item $nativeDll $OutDir -Force
 Copy-Item $nativeInjector $OutDir -Force
+
+# --- Host World fork: the game mod, the skip save and the scripts the
+#     launcher runs for a Game Pass player and for a dedicated world host.
+#     The mod is only ever these two files (see ModPackage.Install); the
+#     launcher and the scripts put it into the game at launch. relay.txt is a
+#     machine's own relay address and is never shipped. ---
+$modOut = Join-Path $OutDir "mod\Data"
+New-Item -ItemType Directory -Path $modOut -Force | Out-Null
+Copy-Item (Join-Path $root "kdcmp\mod.manifest") (Join-Path $OutDir "mod") -Force
+Copy-Item (Join-Path $root "kdcmp\Data\kdcmp.pak") $modOut -Force
+Copy-Item (Join-Path $root "package\*") $OutDir -Recurse -Force -Exclude "relay.txt"
+Copy-Item (Join-Path $root "docs\HOST-WORLD-GUIDE.md") $OutDir -Force
+Copy-Item (Join-Path $root "LICENSE") (Join-Path $OutDir "LICENSE.txt") -Force
 
 Write-Output "`nRelease assembled at: $OutDir"
 Write-Output "Contents:"

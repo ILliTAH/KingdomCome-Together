@@ -36,6 +36,12 @@ public sealed class CombatPipe : IAsyncDisposable
     private NamedPipeClientStream? _pipe;
     private bool _warnedUnavailable;
 
+    // A failed connect costs its 500 ms timeout, and the callers sit in the
+    // loop that applies every other packet. So after one, the pipe is not
+    // looked for again for a while.
+    private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(10);
+    private long _failedAt;
+
     // LocalHit arrives unsolicited, interleaved with command replies, so a
     // single background reader owns the stream and routes frames: replies to
     // whoever is waiting, hits to the callback. Reading inline per command
@@ -53,12 +59,22 @@ public sealed class CombatPipe : IAsyncDisposable
     public bool IsConnected => _pipe?.IsConnected == true;
 
     /// <summary>
+    /// Game Pass: the native plugin cannot be there, so nothing looks for its
+    /// pipe. Every call answers false at once instead of after the 500 ms
+    /// connect attempt, which the receive loop would otherwise sit through
+    /// for each damage, death and hit packet.
+    /// </summary>
+    public bool Disabled { get; init; }
+
+    /// <summary>
     /// Connect if not already connected. Returns false when the DLL is absent,
     /// which is a normal state rather than an error.
     /// </summary>
     public async Task<bool> EnsureConnectedAsync(CancellationToken ct = default)
     {
+        if (Disabled) return false;
         if (IsConnected) return true;
+        if (_failedAt != 0 && System.Diagnostics.Stopwatch.GetElapsedTime(_failedAt) < RetryAfterFailure) return false;
 
         await _gate.WaitAsync(ct);
         try
@@ -75,6 +91,7 @@ public sealed class CombatPipe : IAsyncDisposable
             {
                 _pipe.Dispose();
                 _pipe = null;
+                _failedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (!_warnedUnavailable)
                 {
                     _warnedUnavailable = true;
@@ -84,6 +101,7 @@ public sealed class CombatPipe : IAsyncDisposable
             }
 
             _warnedUnavailable = false;
+            _failedAt = 0;
             Console.WriteLine("[combat] connected to KCDMP.dll");
             _reader = Task.Run(ReadLoopAsync);
             return true;

@@ -67,6 +67,12 @@ namespace KCDMP_launcher.Components.Shared
             string? kcdLog = FindKcdLog(gameRoot);
             AddIfPresent(kcdLog, "kcd.log");
 
+            // Host World fork: the Xbox Game Pass build writes its log to
+            // Documents, which the hunt above (game folders) never reaches.
+            AddIfPresent(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "kcd.log"),
+                "kcd-gamepass.log");
+
             // WO-58: the two files this bundle was missing when it mattered.
             // The 2026-08-25 host freeze was only diagnosable because the
             // native mirror log and the engine's own kcd.log backup happened

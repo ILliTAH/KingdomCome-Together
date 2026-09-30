@@ -5,7 +5,7 @@
 .DESCRIPTION
     Runs tools\Publish-Release.ps1 to assemble release\KCDMP, then compiles
     installer\KCDMP.iss with Inno Setup's command-line compiler into
-    release\KCDMP-Setup-<version>.exe.
+    release\KingdomCome-Coop-Setup-<version>.exe.
 
     The version comes from the VERSION file at the repo root and from nowhere
     else: it is stamped into the Setup filename, the installer's Add/Remove
@@ -40,7 +40,8 @@ function Get-Iscc {
     if ($onPath) { return $onPath.Source }
     foreach ($candidate in @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"   # winget --scope user
     )) {
         if (Test-Path $candidate) { return $candidate }
     }
@@ -92,7 +93,7 @@ Write-Host "Compiling $iss (version $Version) ..."
 & $iscc "/DAppVersion=$Version" $iss
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 
-$setup = Join-Path $root "release\KCDMP-Setup-$Version.exe"
+$setup = Join-Path $root "release\KingdomCome-Coop-Setup-$Version.exe"
 if (-not (Test-Path $setup)) { throw "ISCC reported success but $setup is missing" }
 
 $mb = [math]::Round((Get-Item $setup).Length / 1MB, 1)

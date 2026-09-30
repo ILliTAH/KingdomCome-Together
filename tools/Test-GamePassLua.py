@@ -270,6 +270,7 @@ for authority in (True, False):
         lua.eval("TEST_MakeNpc")(f"ttkc_man_{i}", 1.0 + i * 0.4, 0.0)
     for k in range(5):
         lua.globals().TEST_NOW = 100.0 + k * 2.5
+        lua.eval("KCD2MP_UpdateGhost")("77", 0.0, 0.0, 0.0, 0.0, False)   # the host's position heartbeat
         lua.eval("KCD2MP_NpcSyncTick")()
     events = list(lua.eval("TEST_EVENTS").values())
     check(f"a guest reports no NPCs (relay authority={authority})", len(events) == 0,
@@ -340,14 +341,37 @@ check("a puppet is released after 9 s of silence", released)
 lua.eval("TEST_ResetWorld")("auto", True)
 lua.execute("TEST_NewGhost('3')")
 lua.eval("KCD2MP_SetGhostName")("3", "[HOST] world")
-check("a [HOST] peer makes a Steam player a guest", role() == "guest", role())
+check("a [HOST] name alone is not a host: it has not reported a position", role() == "peer", role())
 check("a [HOST] peer's stand-in is removed", lua.eval("KCD2MP.ghosts")["3"] is None)
 lua.eval("KCD2MP_UpdateGhost")("3", 1.0, 2.0, 3.0, 0.0, False)
+check("a [HOST] peer that reports a position makes a Steam player a guest", role() == "guest", role())
 check("a [HOST] peer is never given a stand-in", lua.eval("KCD2MP.ghosts")["3"] is None)
 lua.eval("KCD2MP_SetGhostName")("4", "Friend")
 check("an ordinary peer's name changes nothing", role() == "guest" and lua.eval("KCD2MP.worldHostIds")["4"] is None)
 lua.eval("KCD2MP_RemoveGhost")("3")
 check("when the [HOST] peer leaves, stock rules apply again", role() == "peer", role())
+
+# The stock agent keeps a departed peer's name and sends it again every few
+# seconds. Only the host's own position packets say it is there.
+lua.eval("KCD2MP_SetGhostName")("3", "[HOST] world")
+check("a departed host's re-sent name does not make a guest again", role() == "peer", role())
+lua.eval("KCD2MP_UpdateGhost")("3", 1.0, 2.0, 3.0, 0.0, False)
+check("a host that reports its position again is the host again", role() == "guest", role())
+lua.globals().TEST_NOW = lua.globals().TEST_NOW + 25.0
+check("a host is still the host after 25 s without a packet", role() == "guest", role())
+lua.globals().TEST_NOW = lua.globals().TEST_NOW + 6.0
+lua.eval("KCD2MP_SetGhostName")("3", "[HOST] world")
+check("a host silent for 30 s no longer counts, whatever names arrive", role() == "peer", role())
+lua.eval("KCD2MP_UpdateGhost")("3", 1.0, 2.0, 3.0, 0.0, False)
+check("one position packet brings it back", role() == "guest", role())
+lua.eval("KCD2MP_SetGhostName")("3", "Friend")
+check("another player who gets the host's old id is not hidden",
+      role() == "peer" and lua.eval("KCD2MP.worldHostIds")["3"] is None, role())
+# A game that restarted (fresh Lua) and is told a departed host's name by a
+# stock agent must not become a guest of nobody.
+lua.eval("TEST_ResetWorld")("auto", True)
+lua.eval("KCD2MP_SetGhostName")("8", "[HOST] world")
+check("a stale [HOST] name in a freshly started game makes no guest", role() == "peer", role())
 
 # Where a dedicated host stands: among the guests when they are together,
 # with the lowest-numbered guest when they are apart.
@@ -374,6 +398,52 @@ for k in range(10):
     lua.eval("KCD2MP_NpcPuppetTick")("ext")
 pos = lua.eval("TEST_NPC_POS")["ttkc_man_3"]
 check("an NPC in a conversation is not moved", (pos["x"], pos["y"]) == (3.0, 3.0), f"{(pos['x'], pos['y'])}")
+
+# The host machine's agent re-asserts the role on its re-arm cadence: a save
+# load kills every timer chain, a game restart forgets the role, and nobody is
+# at a dedicated host to set either again.
+lua.execute(r"""
+    TEST_TIMERS, TEST_PLAYER_MOVED = {}, nil
+    Script = { SetTimer = function(ms, f) TEST_TIMERS[#TEST_TIMERS + 1] = f end }
+    function TEST_RunTimers()
+        local due = TEST_TIMERS
+        TEST_TIMERS = {}
+        for _, f in ipairs(due) do f() end
+        return #TEST_TIMERS
+    end
+    player.SetWorldPos = function(self, p) TEST_PLAYER_MOVED = { x = p.x, y = p.y, z = p.z } end
+""")
+lua.eval("TEST_ResetWorld")("auto", True)
+lua.globals().TEST_NOW = 800.0
+assert_host = lua.eval("KCD2MP_AssertWorldHost")
+pending = lambda: lua.eval("#TEST_TIMERS")
+assert_host(True)
+check("the agent's assertion makes the game the host", role() == "host", role())
+check("and starts the follow loop", lua.eval("KCD2MP.worldHostFollow.enabled") and pending() == 1, f"{pending()} timers")
+assert_host(True)
+check("asserting again starts no second loop", pending() == 1, f"{pending()} timers")
+lua.execute("TEST_NewGhost('7', 100, 0, 5)")
+lua.globals().TEST_NOW = 801.0
+left = lua.eval("TEST_RunTimers")()
+moved = lua.eval("TEST_PLAYER_MOVED")
+check("the follow loop keeps itself going", left == 1, f"{left} timers")
+check("the host is moved to a guest that is far away", moved is not None and moved["x"] == 100.0, f"{moved and moved['x']}")
+lua.execute("TEST_TIMERS = {}")          # a save load: every pending timer is gone
+lua.globals().TEST_NOW = 806.0
+assert_host(True)
+check("after a save load the assertion restarts the follow loop", pending() == 1, f"{pending()} timers")
+lua.eval("KCD2MP_SetWorldHostFollow")("off")
+lua.eval("KCD2MP_SetWorldHostFollow")("on")
+lua.globals().TEST_NOW = 807.0
+left = lua.eval("TEST_RunTimers")()
+check("off then on leaves one loop, not two", left == 1, f"{left} timers")
+lua.execute("KCD2MP.worldRole = 'auto'")  # a game restart: the role is forgotten
+assert_host(False)
+check("after a game restart the assertion restores the role", role() == "host", role())
+check("and follow stays off when the host was started without it", not lua.eval("KCD2MP.worldHostFollow.enabled"))
+lua.globals().TEST_NOW = 808.0
+left = lua.eval("TEST_RunTimers")()
+check("a follow loop that was switched off stops", left == 0, f"{left} timers")
 
 print("\n" + ("ALL PASS" if not failures else f"{len(failures)} FAILED: {failures}"))
 sys.exit(1 if failures else 0)

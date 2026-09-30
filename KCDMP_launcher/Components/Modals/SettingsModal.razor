@@ -15,7 +15,46 @@
                 <div class="modal-title" style="text-align: center;">LAUNCHER SETTINGS</div>
 
                 <div class="kcd-input-group">
-                    <label class="kcd-label">Game Executable Path (Modding Tools build)</label>
+                    <label class="kcd-label">Game to launch</label>
+                    <select class="kcd-input" @bind="Settings.Platform">
+                        <option value="auto">Automatic (@PlatformName(GameInstalls.ResolvePlatform(AutoSettings)))</option>
+                        <option value="steam">Steam - Modding Tools build</option>
+                        <option value="gamepass">Xbox Game Pass</option>
+                    </select>
+                </div>
+
+                <div class="kcd-input-group">
+                    <label class="kcd-label">Xbox Game Pass: Game Executable Path</label>
+
+                    <div style="display: flex; gap: 10px;">
+                        <input class="kcd-input" @bind="Settings.GamePassPath" style="flex-grow: 1;" />
+
+                        <button class="kcd-btn" @onclick="BrowseGamePassPath" style="padding: 8px 15px; font-size: 12px;">
+                            BROWSE
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(Settings.GamePassPath) && !GameInstalls.IsGamePassBuild(Settings.GamePassPath))
+                    {
+                        <div class="kcd-hint" style="color: var(--kcd-warn);">
+                            This does not look like the Game Pass build. It is the KingdomCome.exe in
+                            ...\Kingdom Come- Deliverance II\Content, next to MicrosoftGame.Config.
+                        </div>
+                    }
+
+                    <label class="kcd-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 8px;">
+                        <input type="checkbox" @bind="Settings.AutoLoadLastSave" />
+                        Load my last save automatically when the game starts
+                    </label>
+                </div>
+
+                <div class="kcd-input-group">
+                    <label class="kcd-label">Player Name (empty = your Steam or PC name)</label>
+                    <input class="kcd-input" @bind="Settings.PlayerName" />
+                </div>
+
+                <div class="kcd-input-group">
+                    <label class="kcd-label">Steam: Game Executable Path (Modding Tools build)</label>
 
                     <div style="display: flex; gap: 10px;">
                         <input class="kcd-input" @bind="Settings.GamePath" style="flex-grow: 1;" />
@@ -24,6 +63,24 @@
                             BROWSE
                         </button>
                     </div>
+
+                    @* Not for a Game Pass player, who needs none of it. *@
+                    @if (!GameInstalls.IsModdingToolsBuild(Settings.GamePath) && GameInstalls.ResolvePlatform(Settings) != GamePlatform.GamePass)
+                    {
+                        <div class="kcd-hint" style="color: var(--kcd-warn);">@GameInstalls.SteamAdvice(steamState)</div>
+
+                        <div style="display: flex; gap: 10px; margin: 6px 0;">
+                            @if (steamState is SteamState.NoModdingTools or SteamState.FilesMissing)
+                            {
+                                <button class="kcd-btn" @onclick="GetModdingTools" style="padding: 8px 15px; font-size: 12px;">
+                                    GET THE MODDING TOOLS ON STEAM
+                                </button>
+                            }
+                            <button class="kcd-btn" @onclick="FindGames" style="padding: 8px 15px; font-size: 12px;">
+                                LOOK AGAIN
+                            </button>
+                        </div>
+                    }
 
                     @if (!string.IsNullOrWhiteSpace(Settings.GamePath) && !Home.IsModdingToolsBuild(Settings.GamePath))
                     {
@@ -91,6 +148,57 @@
 @code {
     [Parameter] public AppSettings Settings { get; set; } = new();
     [Parameter] public EventCallback OnSave { get; set; }
+
+    // What is there of the Steam Modding Tools, looked up when the dialog
+    // opens and on LOOK AGAIN -- not on every render, it reads the disk.
+    private SteamState steamState = SteamState.Found;
+    private bool wasVisible;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !wasVisible) steamState = GameInstalls.DiagnoseSteam();
+        wasVisible = IsVisible;
+    }
+
+    private void FindGames()
+    {
+        steamState = GameInstalls.DiagnoseSteam(refresh: true);
+        GameInstalls.Detect(Settings);
+    }
+
+    private void GetModdingTools() =>
+        KCDMP_launcher.Components.Shared.UrlLauncher.Open($"steam://install/{GameInstalls.ModdingToolsAppId}");
+
+    // What "Automatic" would pick with the paths as typed so far.
+    private AppSettings AutoSettings => new() { GamePath = Settings.GamePath, GamePassPath = Settings.GamePassPath };
+
+    private static string PlatformName(GamePlatform p) => p switch
+    {
+        GamePlatform.Steam => "Steam",
+        GamePlatform.GamePass => "Xbox Game Pass",
+        _ => "no game found",
+    };
+
+    private void BrowseGamePassPath()
+    {
+        var thread = new Thread(() =>
+        {
+            var dialog = new OpenFileDialog();
+            dialog.Filter = "KingdomCome.exe|KingdomCome.exe|Executables (*.exe)|*.exe|All Files (*.*)|*.*";
+            dialog.Title = "Select KingdomCome.exe of the Xbox Game Pass game (...\\Kingdom Come- Deliverance II\\Content)";
+
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                Settings.GamePassPath = dialog.FileName;
+
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+    }
 
     private void BrowseGamePath()
     {

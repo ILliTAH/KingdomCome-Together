@@ -31,6 +31,17 @@ foreach ($p in @($cmake, $ninja, $vcvars)) {
     if (-not (Test-Path $p)) { throw "missing component: $p" }
 }
 
+# CMakeLists.txt asks for 3.21. Visual Studio 2019 bundles 3.20, so there a
+# newer cmake from PATH is used instead (for example "pip install cmake").
+$cmakeVersion = [version]((& $cmake --version | Select-Object -First 1) -replace '^cmake version (\d+\.\d+\.\d+).*$', '$1')
+if ($cmakeVersion -lt [version]'3.21.0') {
+    $onPath = Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if (-not $onPath) {
+        throw "Visual Studio's bundled cmake is $cmakeVersion and this needs 3.21. Put a newer cmake on PATH (pip install cmake) and run again."
+    }
+    $cmake = $onPath.Source
+}
+
 $src   = $PSScriptRoot
 $build = Join-Path $src "build"
 if ($Clean -and (Test-Path $build)) { Remove-Item $build -Recurse -Force }

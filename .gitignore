@@ -30,3 +30,6 @@ kcdmp-native.log
 
 # The launcher's own log, written next to the repo root when it runs
 kcd_launcher.log
+
+# A machine's own relay address (Start-GamePass.ps1 writes it): never published
+relay.txt

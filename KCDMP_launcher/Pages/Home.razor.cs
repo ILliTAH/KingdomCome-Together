@@ -77,7 +77,9 @@ namespace KCDMP_launcher.Pages
         // now happens exactly once, gated on the player confirming they are
         // actually in a loaded world, and the result is verified against the
         // DLL's own log rather than trusted from the injector's exit code.
-        private enum LaunchStage { Idle, WaitingForConnect, Injecting, Verifying, Connected, Failed }
+        // Started: the Game Pass and world-host scripts took over; there is
+        // no CONNECT step, the agent waits for the save by itself.
+        private enum LaunchStage { Idle, WaitingForConnect, Injecting, Verifying, Connected, Started, Failed }
         private LaunchStage launchStage = LaunchStage.Idle;
         private Process? pendingGameProcess = null;
         private ServerInfo? pendingServer = null;
@@ -188,6 +190,9 @@ namespace KCDMP_launcher.Pages
         {
             LoadFavorites();
             LoadSettings();
+            // Host World fork: look for the game (either build) instead of
+            // relying on a path the installer wrote.
+            if (GameInstalls.Detect(settings)) PersistSettings();
             LoadCustomServers();
             CheckGamePathOnStartup();
             CheckInstallIntegrity();
@@ -237,23 +242,15 @@ namespace KCDMP_launcher.Pages
         /// </summary>
         private void CheckGamePathOnStartup()
         {
-            if (string.IsNullOrWhiteSpace(settings.GamePath) || !File.Exists(settings.GamePath))
-            {
-                showSettings = true;
-                UiService.ShowError(
-                    "No game found yet. Point 'Game Path' at the KingdomCome.exe inside your " +
-                    "KCD2 Modding Tools install (…\\KCD2Mod\\Bin\\Win64ReleaseSteamLTO_DLL).");
-                return;
-            }
+            if (GameInstalls.ResolvePlatform(settings) != GamePlatform.None) return;
 
-            if (!IsModdingToolsBuild(settings.GamePath))
-            {
-                showSettings = true;
-                UiService.ShowError(
-                    "The saved game path is the retail build. KCD2 must be launched from the Modding " +
-                    "Tools build (KCD2Mod) — it is the only one with the debug API on port 1403 and the " +
-                    "separate module DLLs the plugin hooks.");
-            }
+            // Say what is missing, not just that something is: two empty path
+            // boxes left the person at a server machine with nothing to go on.
+            showSettings = true;
+            UiService.ShowError(
+                "No game this launcher can start was found. " +
+                GameInstalls.SteamAdvice(GameInstalls.DiagnoseSteam()) +
+                " (Kingdom Come: Deliverance II from Xbox Game Pass works too.) Settings has the buttons for it.");
         }
 
         //CUSTOM SERVERS LOGIC 
@@ -466,7 +463,21 @@ namespace KCDMP_launcher.Pages
         /// The game must be the Modding Tools build. That is checked here
         /// rather than left to fail confusingly later — see AppSettings.GamePath.
         /// </summary>
+        // Set before the first await of a launch: the reachability check below
+        // takes up to 3 s, and a second click (or the second half of a
+        // double-click) in that time passed the stage guard and started a
+        // second session, which killed the first.
+        private bool launchStarting;
+
         private async Task LaunchGame(ServerInfo server)
+        {
+            if (launchStarting) return;
+            launchStarting = true;
+            try { await LaunchGameOnce(server); }
+            finally { launchStarting = false; }
+        }
+
+        private async Task LaunchGameOnce(ServerInfo server)
         {
             if (launchStage != LaunchStage.Idle && launchStage != LaunchStage.Failed)
             {
@@ -474,18 +485,10 @@ namespace KCDMP_launcher.Pages
                 return;
             }
 
-            if (string.IsNullOrEmpty(settings.GamePath) || !File.Exists(settings.GamePath))
+            var platform = GameInstalls.ResolvePlatform(settings);
+            if (platform == GamePlatform.None)
             {
                 UiService.ShowError("Game Executable not found! Please check Settings.");
-                return;
-            }
-
-            if (!IsModdingToolsBuild(settings.GamePath))
-            {
-                UiService.ShowError(
-                    "That looks like the retail game. KCD2 must be launched from the Modding Tools build " +
-                    "(KCD2Mod), which is the only one with the debug API on port 1403 and the separate " +
-                    "module DLLs the plugin hooks. Check Settings.");
                 return;
             }
 
@@ -494,6 +497,14 @@ namespace KCDMP_launcher.Pages
                 UiService.ShowError("Server is unreachable. Cannot launch.");
                 return;
             }
+
+            if (platform == GamePlatform.GamePass)
+            {
+                LaunchGamePass(server);
+                return;
+            }
+
+            if (!EnsureSteamModInstalled()) return;
 
             string dllFullPath = ResolveAgainstLauncher(settings.DllPath);
             if (!File.Exists(dllFullPath))
@@ -646,17 +657,7 @@ namespace KCDMP_launcher.Pages
                 // ServerHost/Ip alone is not, since a LAN host address looks
                 // identical to a joiner pointed at the same address.
                 bool isHosting = hostedRelayProcess != null && !hostedRelayProcess.HasExited;
-                var agentArgs = $"--host {pendingServer.Ip} --port {pendingServer.Port}" +
-                    (settings.VoiceChatEnabled ? "" : " --no-voice") +
-                    (isHosting ? " --hosting" : "");
-
-                var agentStartInfo = new ProcessStartInfo
-                {
-                    FileName = agentPath,
-                    Arguments = agentArgs,
-                    UseShellExecute = false,
-                    WorkingDirectory = Path.GetDirectoryName(agentPath)
-                };
+                var agentStartInfo = ScriptLauncher.Agent(agentPath, settings, pendingServer.Ip, pendingServer.Port, isHosting);
 
                 StopExistingAgent();
                 agentProcess = Process.Start(agentStartInfo);
@@ -856,6 +857,163 @@ namespace KCDMP_launcher.Pages
             catch (Exception ex)
             {
                 Log.Warning(ex, "Failed to enumerate KcdMpClient.exe processes");
+            }
+        }
+
+        /// <summary>
+        /// Host World fork, Steam build: the mod and the skip save go where
+        /// the game reads them, at launch rather than at install time, so the
+        /// game can never be left on an older mod than the launcher. False
+        /// (with the error shown) when the launch cannot go on.
+        /// </summary>
+        private bool EnsureSteamModInstalled()
+        {
+            try
+            {
+                string? modDir = GameInstalls.SteamModDir(settings.GamePath);
+                if (modDir is null)
+                {
+                    UiService.ShowError("The game's Data folder was not found above that executable, so there is nowhere to put the mod. Check Settings.");
+                    return false;
+                }
+
+                if (!ModPackage.IsCurrent(modDir, ModPackage.PackageDir))
+                {
+                    if (Process.GetProcessesByName("KingdomCome").Length > 0)
+                    {
+                        UiService.ShowError("The game is running with a different version of the mod. Close the game, then launch again.");
+                        return false;
+                    }
+                    ModPackage.Install(modDir, ModPackage.PackageDir);
+                    Log.Information("Installed the mod to {ModDir}", modDir);
+                }
+
+                if (ModPackage.InstallSkipSave(GameInstalls.SteamSaveRoot(), ModPackage.SkipSaveFile))
+                    Log.Information("Copied the skip save into playline0 as {Name}.whs", ModPackage.SkipSaveName);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                UiService.ShowError($"The mod could not be installed into the game: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Host World fork, Xbox Game Pass build. No plugin to inject and no
+        /// CONNECT step: Start-GamePass.ps1 installs the mod, starts the game
+        /// with its console open, and runs the agent, which waits for the
+        /// save by itself.
+        /// </summary>
+        private void LaunchGamePass(ServerInfo server)
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            if (!File.Exists(Path.Combine(baseDir, ScriptLauncher.GamePassScript)))
+            {
+                UiService.ShowError($"{ScriptLauncher.GamePassScript} is missing from {baseDir}. Reinstall the launcher.");
+                return;
+            }
+
+            try
+            {
+                StopExistingAgent();
+                bool isHosting = hostedRelayProcess != null && !hostedRelayProcess.HasExited;
+                agentProcess = Process.Start(ScriptLauncher.GamePass(baseDir, settings, server.Ip, server.Port));
+                _ = WatchScriptAsync(agentProcess);
+                Log.Information("Started the Game Pass session for {Ip}:{Port} (hosting: {Hosting})", server.Ip, server.Port, isHosting);
+
+                launchStage = LaunchStage.Started;
+                launchStatusMessage = settings.AutoLoadLastSave
+                    ? "The game is starting and loads your last save by itself. The console window that opened is the agent: keep it open while you play."
+                    : "The game is starting. Load your save; the console window that opened is the agent: keep it open while you play.";
+                StateHasChanged();
+
+                versionPollCts?.Cancel();
+                versionPollCts = new CancellationTokenSource();
+                _ = PollVersionMismatchAsync(versionPollCts.Token);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                UiService.ShowError($"Critical Launch Error: {ex.Message}");
+                ResetLaunchState();
+            }
+        }
+
+        /// <summary>
+        /// The scripts report their own errors in their console window. This
+        /// only keeps the launcher from going on saying "GAME STARTING" over a
+        /// session that has ended: a script that stops with an error (its own,
+        /// or the agent's exit code) turns the dialog into a failure; one that
+        /// ends with none clears it. Closing the game ends neither -- the agent
+        /// goes on waiting for it, as the stock one does.
+        /// </summary>
+        private async Task WatchScriptAsync(Process? script)
+        {
+            if (script is null) return;
+            try { await script.WaitForExitAsync(); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { return; }
+
+            await InvokeAsync(() =>
+            {
+                // A later launch replaced this one, or the dialog was closed.
+                if (!ReferenceEquals(script, agentProcess) || launchStage != LaunchStage.Started) return;
+
+                if (script.ExitCode != 0)
+                {
+                    Log.Warning("The session script ended with exit code {Code}", script.ExitCode);
+                    launchStage = LaunchStage.Failed;
+                    launchStatusMessage = "The session stopped with an error. The console window showed what went wrong; fix that and launch again.";
+                    StateHasChanged();
+                }
+                else
+                {
+                    ResetLaunchState();
+                }
+            });
+        }
+
+        /// <summary>
+        /// Host World fork: this machine as the dedicated world host (nobody
+        /// plays on it). Start-WorldHost.ps1 starts its own relay, so that the
+        /// relay outlives this launcher; the one the Host dialog started is
+        /// stopped first.
+        /// </summary>
+        private async Task LaunchWorldHost()
+        {
+            showHostInfo = false;
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            if (!GameInstalls.IsModdingToolsBuild(settings.GamePath))
+            {
+                UiService.ShowError("A world host runs the Steam Modding Tools build. Point Settings at its KingdomCome.exe.");
+                return;
+            }
+            if (!File.Exists(Path.Combine(baseDir, ScriptLauncher.WorldHostScript)))
+            {
+                UiService.ShowError($"{ScriptLauncher.WorldHostScript} is missing from {baseDir}. Reinstall the launcher.");
+                return;
+            }
+
+            try
+            {
+                StopExistingAgent();
+                StopHostedRelay();
+                await Task.Delay(500);   // let the port go before the script looks at it
+                agentProcess = Process.Start(ScriptLauncher.WorldHost(baseDir, settings));
+                _ = WatchScriptAsync(agentProcess);
+                Log.Information("Started the world host");
+
+                launchStage = LaunchStage.Started;
+                launchStatusMessage =
+                    "This machine is becoming the world host: the game starts, loads the skip save and is minimised. " +
+                    "The console window that opened is the server: keep it open. You can close this launcher.";
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                UiService.ShowError($"Critical Launch Error: {ex.Message}");
+                ResetLaunchState();
             }
         }
 
@@ -1098,14 +1256,7 @@ namespace KCDMP_launcher.Pages
         /// exported from CrySystem.dll. So this tests for what is needed rather
         /// than for an install path.
         /// </summary>
-        public static bool IsModdingToolsBuild(string gamePath)
-        {
-            string dir = Path.GetDirectoryName(gamePath) ?? "";
-            if (dir.Length == 0) return false;
-
-            return File.Exists(Path.Combine(dir, "Framework.dll"))
-                && File.Exists(Path.Combine(dir, "CrySystem.dll"));
-        }
+        public static bool IsModdingToolsBuild(string gamePath) => GameInstalls.IsModdingToolsBuild(gamePath);
 
         /// <summary>
         /// The install root, two levels above KingdomCome.exe
@@ -1295,6 +1446,13 @@ namespace KCDMP_launcher.Pages
                 showSettings = false;
             }
             catch (Exception ex) { errorMessage = ex.Message; }
+        }
+
+        /// <summary>Writes settings.json without touching the Settings dialog.</summary>
+        private void PersistSettings()
+        {
+            try { File.WriteAllText(SettingsFileName, JsonSerializer.Serialize(settings)); }
+            catch (Exception ex) { Log.Warning(ex, "Could not save settings.json"); }
         }
 
 

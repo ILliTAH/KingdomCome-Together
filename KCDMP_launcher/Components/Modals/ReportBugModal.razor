@@ -12,8 +12,8 @@
                 <div class="modal-title">REPORT A BUG</div>
 
                 <p>
-                    Found something broken? Tell us on GitHub, or drop a message
-                    in Discord -- whichever you'd rather use.
+                    Found something broken? Tell us on GitHub. This is the Host
+                    World fork: please report here, not to the original project.
                 </p>
                 <p>
                     Please attach the log bundle: COLLECT LOGS puts a zip on
@@ -23,7 +23,6 @@
 
                 <div class="modal-actions">
                     <button class="kcd-btn primary" @onclick="OpenGitHubIssues">GITHUB ISSUES</button>
-                    <button class="kcd-btn primary" @onclick="OpenDiscord">DISCORD</button>
                     <button class="kcd-btn primary" @onclick="CollectLogs">COLLECT LOGS</button>
                 </div>
                 @if (!string.IsNullOrEmpty(collectResult))
@@ -45,8 +44,9 @@
     // community, not something a server operator or player should point
     // elsewhere -- unlike MasterServerUrl or RelayPath, there is only ever
     // one right value.
-    private const string GitHubIssuesUrl = "https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/issues";
-    private const string DiscordInviteUrl = "https://discord.gg/m4U95xUZ5";
+    // Host World fork: this fork's tracker. The original project's tracker
+    // and Discord are for the original; its maintainers cannot fix this fork.
+    private const string GitHubIssuesUrl = "https://github.com/ILliTAH/KingdomCome-Together/issues";
 
     // WO-39, item K: supplied by Home, which owns the settings these paths
     // come from. Empty is fine -- LogBundle skips what it cannot find.
@@ -56,7 +56,6 @@
     private string collectResult = "";
 
     private void OpenGitHubIssues() => UrlLauncher.Open(GitHubIssuesUrl);
-    private void OpenDiscord() => UrlLauncher.Open(DiscordInviteUrl);
 
     private void CollectLogs()
     {
