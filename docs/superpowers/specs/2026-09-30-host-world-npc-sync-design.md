@@ -9,9 +9,10 @@ on both screens and move continuously, instead of warping. The user's words:
 "make it a central world — still and smooth".
 
 A real central server is not possible: KCD2 has no server build, and a world is
-only simulated by a running game with a player standing in it. So one player's
-game is the world ("host") and the other displays it ("guest"). The user chose
-**the Steam player's game as host**; the Game Pass game is the guest.
+only simulated by a running game with a player standing in it. So one game is the
+world ("host") and the others display it ("guests"). The user's decision: **the
+host is a dedicated Steam machine that nobody plays on**; every player's game —
+the Steam player's and the Game Pass player's — is a guest.
 
 ## What the live session showed (631 s, this branch, stock mod on the Steam side)
 
@@ -36,13 +37,15 @@ count limit, and a guest that never sends cannot create a claim.
 
 ### Role
 
-`KCD2MP_WorldRole()` returns `host` or `guest`. `KCD2MP.worldRole = "auto"`
-derives it from the build: a game that has `XGenAIModule.SpawnEntity` (Modding
-Tools) is a host; one that does not (retail, Game Pass) is a guest.
-`mp_world_role host|guest|auto` overrides it for a session.
+`KCD2MP_WorldRole()` returns `host`, `guest` or `peer`:
 
-Two Modding Tools players are both hosts and behave as stock 0.18.2 does, with
-the larger tracked set: the relay's per-entity claims still arbitrate.
+1. `mp_world_role host|guest` says so outright. `host` is only ever set this
+   way, by the host machine's launcher; a player's machine never becomes a host
+   by itself.
+2. A peer whose name starts with `[HOST]` is in the session: this game is a
+   guest and never shows that peer.
+3. Otherwise `peer`: no host in the session, stock 0.18.2 rules (5 NPCs within
+   30 m, proximity claims).
 
 ### Host: emit the neighbourhood
 
@@ -75,7 +78,8 @@ Nothing else on the emitting side changes.
 
 ## Testing
 
-- `tools/Test-GamePassLua.py`: role auto-detection both ways and the override;
+- `tools/Test-GamePassLua.py`: a player's machine is never a host by itself on
+  either build, only a machine told to host is, and a `[HOST]` peer makes a guest;
   a guest emits nothing with NPCs all around it; a host tracks 40 of 60
   candidates and never one beyond the radius; a puppet fed 4 Hz packets at
   1.4 m/s is drawn at walking pace on at least 90% of frames and never stands

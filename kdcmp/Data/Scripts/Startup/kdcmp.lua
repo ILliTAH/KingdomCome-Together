@@ -1873,21 +1873,21 @@ KCD2MP.npcSync = {
 -- ===== Host world =====
 --
 -- Two games cannot agree on where an NPC is: each runs its own AI. So one
--- game is the world and the others display it. A host reports the NPCs around
--- it (hostMaxTracked within hostRadius); a guest reports none -- no state, no
--- proximity claims, no drag claims -- so nothing it does can take an NPC away
--- from the host, and it only moves puppets.
+-- game is the world and the others display it. The host is a dedicated
+-- machine nobody plays on; every player's game is a guest. A host reports the
+-- NPCs around it (hostMaxTracked within hostRadius); a guest reports none --
+-- no state, no proximity claims, no drag claims -- so nothing it does can
+-- take an NPC away from the host, and it only moves puppets.
 --
--- Who is the host, in order:
---   1. mp_world_role host|guest says so outright (a dedicated host machine
---      is told "host" by its launcher).
---   2. A peer whose name starts with "[HOST]" is in the session: that is a
---      dedicated world host, so everyone else is a guest -- including a
---      Modding Tools player -- and that peer's stand-in is never shown.
---   3. Otherwise the build decides: a game that can spawn soul-bound entities
---      (XGenAIModule.SpawnEntity, Modding Tools only) hosts, a retail or Game
---      Pass game is a guest. Two Modding Tools players are then both hosts and
---      behave as stock 0.18.2, with the relay's per-entity claims arbitrating.
+-- The role, in order:
+--   1. mp_world_role host|guest says so outright. "host" is only ever set
+--      this way -- by the host machine's launcher. A player's machine never
+--      becomes a host by itself.
+--   2. A peer whose name starts with "[HOST]" is in the session: that is the
+--      dedicated host, so this game is a guest, and that peer's stand-in is
+--      never shown.
+--   3. Otherwise "peer": there is no host in the session and the mod behaves
+--      as stock 0.18.2 (5 NPCs within 30 m, proximity claims).
 KCD2MP.worldRole = "auto"   -- "host" | "guest" | "auto"; mp_world_role sets it
 KCD2MP.worldHostIds = {}    -- ghost id -> true: peers named as a dedicated world host
 
@@ -1899,8 +1899,7 @@ function KCD2MP_WorldRole()
     local r = KCD2MP.worldRole
     if r == "host" or r == "guest" then return r end
     if next(KCD2MP.worldHostIds) then return "guest" end
-    if XGenAIModule and XGenAIModule.SpawnEntity then return "host" end
-    return "guest"
+    return "peer"
 end
 
 function KCD2MP_SetWorldRole(arg)

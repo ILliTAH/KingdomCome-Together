@@ -194,9 +194,11 @@ check("a swing does not freeze the ghost", ghost["istate"]["oneShotUntil"] is No
       f"oneShotUntil={ghost['istate']['oneShotUntil']}")
 
 # --- 6. host world ----------------------------------------------------------------
-# One game decides where the NPCs are. A Modding Tools build is the host and
-# reports its neighbourhood; a retail / Game Pass build is the guest and only
-# displays. (docs/superpowers/specs/2026-09-30-host-world-npc-sync-design.md)
+# One game decides where the NPCs are: a dedicated host machine nobody plays
+# on. It reports its neighbourhood; every player's game is a guest and only
+# displays. A player's machine never becomes a host by itself -- with no host
+# in the session it behaves as stock 0.18.2 ("peer").
+# (docs/superpowers/specs/2026-09-30-host-world-npc-sync-design.md)
 lua.execute(r"""
     local NOP
     NOP = setmetatable({}, { __index = function() return NOP end, __call = function() return nil end })
@@ -230,26 +232,38 @@ lua.execute(r"""
         end
         return out
     end
-    function TEST_ResetWorld(role_xgen)
+    function TEST_ResetWorld(role, moddingTools)
         TEST_EVENTS, TEST_NPCS, TEST_NPC_POS = {}, {}, {}
         KCD2MP.npcTracked, KCD2MP.npcPuppets, KCD2MP.ghosts = {}, {}, {}
         KCD2MP._npcScanAt = -100
         KCD2MP.npcSyncRunning, KCD2MP.npcSync.enabled = true, true
-        XGenAIModule = role_xgen and { SpawnEntity = function() end } or {}
-        KCD2MP.worldRole = "auto"
+        XGenAIModule = moddingTools and { SpawnEntity = function() end } or {}
+        KCD2MP.worldRole = role or "auto"
+        KCD2MP.worldHostIds = {}
     end
     function TEST_Count(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
 """)
 role = lua.eval("KCD2MP_WorldRole")
-lua.eval("TEST_ResetWorld")(True)
-check("a Modding Tools build is the host", role() == "host", role())
-lua.eval("TEST_ResetWorld")(False)
-check("a retail / Game Pass build is the guest", role() == "guest", role())
-lua.execute('KCD2MP.worldRole = "host"')
-check("the role can be overridden", role() == "host", role())
+lua.eval("TEST_ResetWorld")("auto", True)
+check("a Steam player's machine is not a host by itself", role() == "peer", role())
+lua.eval("TEST_ResetWorld")("auto", False)
+check("a Game Pass player's machine is not a host by itself", role() == "peer", role())
+lua.eval("TEST_ResetWorld")("host", True)
+check("only a machine told to host is a host", role() == "host", role())
+
+# No host in the session: stock 0.18.2 rules, on either build.
+lua.eval("TEST_ResetWorld")("auto", True)
+lua.globals().KCD2MP.hitSensorOn = True
+for i in range(60):
+    lua.eval("TEST_MakeNpc")(f"ttkc_man_{i}", 1.0 + i * 0.4, 0.0)
+lua.globals().TEST_NOW = 50.0
+lua.eval("KCD2MP_NpcSyncTick")()
+check("with no host, a player's game tracks the stock 5 NPCs", len(list(lua.eval("KCD2MP.npcTracked").keys())) == 5,
+      f"{len(list(lua.eval('KCD2MP.npcTracked').keys()))} tracked")
 
 for authority in (True, False):
-    lua.eval("TEST_ResetWorld")(False)
+    lua.eval("TEST_ResetWorld")("auto", True)   # a Steam player, with a dedicated host in the session
+    lua.eval("KCD2MP_SetGhostName")("77", "[HOST] world")
     lua.globals().KCD2MP.hitSensorOn = authority
     lua.execute("TEST_NewGhost('5')")           # a peer is present, so stock 0.18.2 would claim
     for i in range(60):
@@ -261,7 +275,7 @@ for authority in (True, False):
     check(f"a guest reports no NPCs (relay authority={authority})", len(events) == 0,
           f"{len(events)} events, first: {events[:1]}")
 
-lua.eval("TEST_ResetWorld")(True)
+lua.eval("TEST_ResetWorld")("host", True)
 lua.globals().KCD2MP.hitSensorOn = True
 for i in range(60):
     lua.eval("TEST_MakeNpc")(f"ttkc_man_{i}", 1.5 * (i + 1), 0.0)      # 1.5 m .. 90 m away
@@ -275,7 +289,7 @@ check("a host reports each tracked NPC", len(list(lua.eval("TEST_EVENTS").values
       f"{len(list(lua.eval('TEST_EVENTS').values()))} events")
 
 def simulate_puppet(walk_s=8.0, total_s=11.0, speed=1.4, period=0.25, fps=30):
-    lua.eval("TEST_ResetWorld")(False)
+    lua.eval("TEST_ResetWorld")("guest", False)
     lua.eval("TEST_MakeNpc")("ttkc_man_1", 10.0, 5.0)
     seed, packets, k = 777, [], 0
     while k * period <= walk_s:
@@ -308,7 +322,7 @@ check("an NPC puppet walks while walking", sum(f[3] == "walk" for f in steady) /
 check("an NPC puppet settles where the host left it", abs(frames[-1][1] - final_x) <= 0.1,
       f"off by {abs(frames[-1][1] - final_x):.2f} m")
 
-lua.eval("TEST_ResetWorld")(False)
+lua.eval("TEST_ResetWorld")("guest", False)
 lua.eval("TEST_MakeNpc")("ttkc_man_2", 3.0, 3.0)
 lua.globals().TEST_NOW = 500.0
 lua.eval("KCD2MP_ApplyNpcState")("ttkc_man_2", 3.0, 3.0, 0.0, 0.0, 100.0, 0)
@@ -323,17 +337,17 @@ check("a puppet is released after 9 s of silence", released)
 
 # A dedicated world host: a peer named "[HOST]..." makes everyone else a guest,
 # a Modding Tools player included, and gets no stand-in.
-lua.eval("TEST_ResetWorld")(True)
-lua.execute("KCD2MP.worldHostIds = {} TEST_NewGhost('3')")
+lua.eval("TEST_ResetWorld")("auto", True)
+lua.execute("TEST_NewGhost('3')")
 lua.eval("KCD2MP_SetGhostName")("3", "[HOST] world")
-check("a [HOST] peer makes a Modding Tools player a guest", role() == "guest", role())
+check("a [HOST] peer makes a Steam player a guest", role() == "guest", role())
 check("a [HOST] peer's stand-in is removed", lua.eval("KCD2MP.ghosts")["3"] is None)
 lua.eval("KCD2MP_UpdateGhost")("3", 1.0, 2.0, 3.0, 0.0, False)
 check("a [HOST] peer is never given a stand-in", lua.eval("KCD2MP.ghosts")["3"] is None)
 lua.eval("KCD2MP_SetGhostName")("4", "Friend")
 check("an ordinary peer's name changes nothing", role() == "guest" and lua.eval("KCD2MP.worldHostIds")["4"] is None)
 lua.eval("KCD2MP_RemoveGhost")("3")
-check("when the [HOST] peer leaves, the build decides again", role() == "host", role())
+check("when the [HOST] peer leaves, stock rules apply again", role() == "peer", role())
 
 # Where a dedicated host stands: among the guests when they are together,
 # with the lowest-numbered guest when they are apart.
@@ -348,7 +362,7 @@ tx, ty, tz = target()
 check("apart: the host stays with the lowest-numbered guest", (tx, ty, tz) == (0.0, 0.0, 5.0), f"{(tx, ty, tz)}")
 
 # An NPC the local player is talking to is left where it is.
-lua.eval("TEST_ResetWorld")(False)
+lua.eval("TEST_ResetWorld")("guest", False)
 npc = lua.eval("TEST_MakeNpc")("ttkc_man_3", 3.0, 3.0)
 lua.execute("TEST_NPCS['ttkc_man_3'].human = { IsInDialog = function() return true end, IsWeaponDrawn = function() return false end }")
 lua.globals().TEST_NOW = 600.0

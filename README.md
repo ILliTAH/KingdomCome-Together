@@ -12,7 +12,7 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-555555?style=flat-square">
 </p>
 
-**English summary.** A fork of [Kingdom Come: Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`. It lets **Xbox Game Pass** players join a stock 0.18.2 session, and adds **Host World**: one game decides where the NPCs are and every other player displays it, including a dedicated host machine. The Game Pass path is tested on a live game; the Steam and dedicated-host paths have never been run. Details: [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) (Thai) and [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) (English).
+**English summary.** A fork of [Kingdom Come: Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`. It lets **Xbox Game Pass** players join a stock 0.18.2 session, and adds **Host World**: a dedicated host machine that nobody plays on decides where the NPCs are, and every player's game displays it. The Game Pass path is tested on a live game; the Steam and dedicated-host paths have never been run. Details: [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) (Thai) and [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) (English).
 
 > **ไม่เกี่ยวข้องกับ Warhorse Studios** — Kingdom Come: Deliverance เป็นเครื่องหมายการค้าของ Warhorse Studios
 > โปรเจกต์นี้เป็นงานแฟนเมดที่ไม่แสวงกำไร และยังเป็นรุ่นทดลอง ควรสำรองเซฟก่อนเล่น
@@ -24,8 +24,8 @@
 | | ตัวเดิม 0.18.2 | fork นี้ |
 |---|---|---|
 | ผู้เล่น **Xbox Game Pass** | เล่นไม่ได้ (ต้องใช้ Steam + Modding Tools) | **เล่นได้** — agent คุยกับเกมผ่าน RemoteConsole แทน debug API |
-| ตำแหน่ง NPC | แต่ละเครื่องคิดเอง ยืมกันได้ 5 ตัวในระยะ 30 ม. แล้วแย่งกัน | **Host World** — เกมเครื่องเดียวเป็นโลกกลาง รายงาน 40 ตัวในระยะ 60 ม. เครื่องอื่นแสดงผลตาม |
-| เครื่องโฮสต์แยก | ไม่มี | มีตัวเปิด (relay + เกม + agent) — **ยังไม่เคยรันกับเกมจริง** |
+| ตำแหน่ง NPC | แต่ละเครื่องคิดเอง ยืมกันได้ 5 ตัวในระยะ 30 ม. แล้วแย่งกัน | **Host World** — เครื่องโฮสต์แยก (ไม่มีคนเล่น) เป็นโลกกลาง รายงาน 40 ตัวในระยะ 60 ม. เครื่องผู้เล่นทุกเครื่องแสดงผลตาม |
+| เครื่องโฮสต์ | ไม่มี | มีตัวเปิด (relay + เกม + agent) สำหรับเครื่องเซิร์ฟเวอร์ — **ยังไม่เคยรันกับเกมจริง** |
 | ตัวแทนของเพื่อน (ฝั่ง Game Pass) | — | หุ่นเชิดไม่มี AI ลอกหน้าตาจากตัวเรา เดินต่อเนื่อง ฟันให้เห็น |
 | ตัวติดตั้ง | `KCDMP-Setup` (Steam เท่านั้น) | `Setup.bat` ตัวเดียว ใช้ได้ทั้ง Game Pass / Steam / เครื่องโฮสต์ |
 
@@ -50,7 +50,8 @@ agent ยังรายงานเวอร์ชัน `0.18.2` และ wir
  ผู้เล่น Steam (guest)        ผู้เล่น Game Pass (guest)
 ```
 
-ไม่มีเครื่องโฮสต์แยกก็เล่นได้: ผู้เล่น Steam จะเป็นโฮสต์เอง ผู้เล่น Game Pass เป็น guest
+**โฮสต์คือเครื่องเซิร์ฟเวอร์แยก ไม่มีใครเล่นบนเครื่องนั้น** ผู้เล่นทุกคน (Steam และ Game Pass) เป็น guest
+เครื่องผู้เล่นไม่เป็นโฮสต์เองไม่ว่ากรณีใด — ถ้าเครื่องโฮสต์ไม่ได้เปิดอยู่ ม็อดทำงานแบบ 0.18.2 เดิม (ไม่มีโลกกลาง)
 
 ## สถานะ: อะไรทดสอบแล้ว
 
@@ -73,7 +74,7 @@ agent ยังรายงานเวอร์ชัน `0.18.2` และ wir
 | ส่งตำแหน่ง เลือด stamina ของเรา | ✅ | ✅ |
 | ท่าฟันของผู้เล่นอื่น | ✅ (native) | ✅ (คลิปฟันจริง) |
 | สภาพอากาศและเวลาตามเซสชัน | ✅ | ✅ |
-| NPC ตามโลกของโฮสต์ (ตำแหน่ง เดิน/วิ่ง ถืออาวุธ) | ✅ | ✅ |
+| NPC ตามโลกของเครื่องโฮสต์ (ตำแหน่ง เดิน/วิ่ง ถืออาวุธ) | ✅ | ✅ |
 | คุยเสียงตามระยะ, Farkle | ✅ | ยังไม่ได้ทดสอบ |
 | ชุดเกราะ/อาวุธของผู้เล่นอื่นตรงกับของจริง | ✅ | ❌ (ตัวแทนลอกหน้าตาจากตัวเราแทน) |
 | ความเสียหาย/การตายข้ามเครื่อง | ✅ | ❌ |
