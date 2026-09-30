@@ -1,541 +1,139 @@
-> **This is a fork** of [DeepFriedDepp/KingdomCome-Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`, modified 2026-09-30. It adds two things:
->
-> 1. **Xbox Game Pass players can join** a stock 0.18.2 session (the agent talks to the game over RemoteConsole instead of the Modding Tools debug API).
-> 2. **Host World** - one game decides where the NPCs are and every other player displays it, including a dedicated host machine.
->
-> Start here: **[docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md)** (setup, what is tested and what is not) and **[docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md)** (every change, with the measurement behind it). The dedicated-host launcher has never been run on a Steam machine. Everything below this notice is the original 0.18.2 README. Same licence: GPLv3.
-
 <p align="center">
   <img src="docs/branding/kcd2-mp-logo.png" alt="KCD2 Multiplayer" width="220">
 </p>
 
-<h1 align="center">KCD2 Multiplayer</h1>
-<p align="center"><em>An unofficial co-op mod for Kingdom Come: Deliverance II.</em></p>
+<h1 align="center">Kingdom Come: Together — Host World fork</h1>
+<p align="center"><em>ม็อด co-op ไม่เป็นทางการสำหรับ Kingdom Come: Deliverance II — เพิ่มผู้เล่น Xbox Game Pass และ "โลกกลาง"</em></p>
 
 <p align="center">
-  <a href="docs/releases/RELEASE-NOTES-0.18.2.md"><img alt="main" src="https://img.shields.io/badge/main-0.18.2-b8860b?style=flat-square"></a>
-  <a href="https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/DeepFriedDepp/kcd2-multiplayer_Reworked?label=latest%20release&color=8a3324&style=flat-square"></a>
+  <a href="https://github.com/ILliTAH/KingdomCome-Together/releases"><img alt="release" src="https://img.shields.io/github/v/release/ILliTAH/KingdomCome-Together?include_prereleases&label=release&style=flat-square&color=b8860b"></a>
+  <img alt="base" src="https://img.shields.io/badge/base-KCDMP%200.18.2-555555?style=flat-square">
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-2c3e50?style=flat-square"></a>
-  <a href="docs/LAUNCHING.md"><img alt="Platform" src="https://img.shields.io/badge/platform-Windows-555555?style=flat-square"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-555555?style=flat-square">
 </p>
 
-Two or more people play the same open world together at once: you see each
-other as ghost NPCs (position, animation, nameplates, and each other's
-actual equipped armor *and* weapons — not one fixed costume), hear each
-other over proximity voice chat, can land shared damage on each other and on
-the world's NPCs, and can play a full relay-authoritative game of Farkle dice
-against each other from inside the game itself.
+**English summary.** A fork of [Kingdom Come: Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`. It lets **Xbox Game Pass** players join a stock 0.18.2 session, and adds **Host World**: one game decides where the NPCs are and every other player displays it, including a dedicated host machine. The Game Pass path is tested on a live game; the Steam and dedicated-host paths have never been run. Details: [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) (Thai) and [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) (English).
 
-> **Not affiliated with, endorsed by, or supported by Warhorse Studios.**
-> Kingdom Come: Deliverance is a trademark of Warhorse Studios; this is a
-> non-commercial fan project.
+> **ไม่เกี่ยวข้องกับ Warhorse Studios** — Kingdom Come: Deliverance เป็นเครื่องหมายการค้าของ Warhorse Studios
+> โปรเจกต์นี้เป็นงานแฟนเมดที่ไม่แสวงกำไร และยังเป็นรุ่นทดลอง ควรสำรองเซฟก่อนเล่น
 
-> **Two version numbers, on purpose** — see the badges above. `main` (this
-> repo's source) is ahead of the last published installer; the feature list
-> below describes `main`. Installing from the
-> [releases page](https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/releases)
-> gets you that published build's feature set, not everything described
-> here — [Building from source](#building-from-source) gets you current
-> `main`.
+---
 
-<!-- screenshot/gif here -->
+## fork นี้เพิ่มอะไรจาก KCDMP 0.18.2
 
-## Contents
-
-- [Features](#features)
-- [How to play with a friend](#how-to-play-with-a-friend)
-- [Install](#install)
-- [How to play dice](#how-to-play-dice)
-- [Architecture](#architecture)
-- [Repository layout](#repository-layout)
-- [Building from source](#building-from-source)
-- [Testing](#testing)
-- [What's left, and reporting bugs](#whats-left-undone-what-still-needs-a-human-and-reporting-bugs)
-- [License and provenance](#license-and-provenance)
-
-## Features
-
-At a glance — every row is expanded with the full evidence, caveats and
-known rough edges in [the detailed status table](#full-status-detail) below.
-"Unverified" always means exactly that, never "probably fine."
-
-| Feature | Status |
-|---|---|
-| Ghost presence (position, animation, nameplates, per-player face) | ✅ Working |
-| Appearance sync (real armor & weapons, not a costume) | ✅ Working solo — ⚠️ unverified with 2 real humans |
-| Shared combat (damage & death on world NPCs) | ✅ Working solo — ⚠️ unverified with 2 real humans |
-| Shared player health/death (HP on nameplate, death → reload) | ✅ Working, live-verified |
-| NPC hits on a player crossing between machines | 🚧 Built, guards verified — cross-machine hit unverified |
-| NPC sync (hand-placed NPCs mirrored across machines) | ✅ Working, on by default — proximity-based authority as of 0.18.2 |
-| Reactive ghost combat (self-defense, joins nearby fights) | ✅ Working, always on, no toggle |
-| Proactive NPC aggro on ghosts (`mp_enable_aggro`) | ✅ Working, opt-in, off by default |
-| Dropped-item sync (shared pickups, race-safe) | ✅ Working |
-| Voice chat | ✅ Working, proximity-based |
-| Reconnect / mid-session save-reload recovery | ✅ Fixed, live-verified |
-| Time-of-day, weather and horse-identity sync | ✅ Working |
-| Farkle dice, played in-game | ✅ Working vs a scripted opponent — ⚠️ unverified with 2 real humans |
-| Server browser (master server) | ✅ Working, live-tested |
-| Launcher (host/join, dependency handling) | 🚧 Built — end-to-end run unverified |
-| One-click installer | ✅ Working — automated + manual tests |
-| Emotes | ❌ Not implemented |
-| Duelling | ❌ Not implemented |
-| Dice wagers | ❌ Not implemented — score-only match, no groschen change hands |
-| Ranged weapon swings on ghosts | ❌ Melee only |
-
-<details>
-<summary><a id="full-status-detail"></a><strong>Full status detail — every caveat, every unverified claim</strong></summary>
-
-| Feature | Status |
-|---|---|
-| Relay (`KcdMpServer.exe`) | **Working** — automated suites green |
-| Agent (`KcdMpClient.exe`) | **Working** |
-| Native plugin + injection | **Working** — the liveness race that used to make early injection silently no-op is fixed and verified by a real cold-start injection (the DLL now polls for the game's tick instead of sampling once, and picked the tick up 42s after hooking where it previously aborted at 1s). One **residual gap** remains in the step immediately after it — see below |
-| Ghost presence (position/animation/nameplates) | **Working**, including while *you* are in a menu — ghosts keep moving instead of freezing and snapping, measured at 6–7 m of real ghost travel during a menu that previously froze them dead. A peer who is *themselves* in a menu is tagged **`[in menu]`** on their nameplate, confirmed on screen. Your own nameplates stay hidden during your own menu, as before — see below |
-| Ghost faces | **Working** — each connected player is deterministically assigned one of 48 real, hand-placed NPC faces from the game's own roster (the same name always gets the same face, including across reconnects), instead of every ghost sharing one generic look |
-| Reconnecting | **Fixed** — rejoining under a new connection used to orphan your old ghost instead of replacing it, leaving stray duplicate ghosts stacked on top of you; identity, not connection id, now decides which ghost is yours. A related launcher bug is fixed alongside it: closing only the game (not the launcher) and reconnecting could start a second agent process on top of a stale one, with the two fighting over the same ghost forever — visible in-game as an NPC seemingly attached to the player. The launcher now stops any existing agent before starting a new one |
-| Appearance sync (ghosts mirror your real equipped armor and weapons) | **Working** against synthetic peers and in real single-machine play — per-item, not a fixed costume; **unverified** with a second real human. Weapons go through the same mechanism as armor and were human-confirmed on screen across swords, an axe, a mace, shield+sword and a crossbow. Individual equip/unequip calls occasionally take several seconds to a couple of minutes to actually land under load — a **known rough edge**, not silently broken, see below |
-| Shared combat | **Working** against synthetic peers and in real single-machine play; **unverified** with a second real human |
-| Shared player health and death | **Working** — every player's own health and stamina now reach everyone else, so a peer's ghost shows their real `HP`/`ST` on its nameplate instead of looking permanently healthy while its owner is being killed. A player who dies is announced explicitly by their own game (never guessed from health hitting zero) and their ghost is tagged **`[dead - reloading]`**, clearing by itself once they are back in the world. Live-verified end to end on one machine, 17/17. **What death does is ordinary single-player behaviour: you reload your own most recent save.** Nobody else's world reverts — every player has always had a completely separate save, and this mod has never had, and is not getting, a way to sync one player's save into another's |
-| NPC hits on a player crossing between players | **Built, guards verified, cross-machine step UNVERIFIED.** An NPC attacking your ghost in someone else's world reports the damage back to you, so NPC combat can hurt a remote player rather than only their stand-in. Exactly one client holds this authority at a time (the relay assigns it) — without that, every player's own NPCs would independently damage everyone and multiply the damage by the player count. All three guards around it are individually verified live, plus a positive control. The actual hit crossing two machines was **not** tested: there is one machine here and no second player. **This does not synchronise NPCs themselves** — each player still sees their own local version of any fight; what's shared is only who got hurt and who died, never the NPC's position, animation or AI state |
-| Recovering from a mid-session save reload | **Fixed, live-verified.** Loading a save used to permanently stop that player transmitting at all — they simply vanished for everyone else for the rest of the session — and destroyed every other player's ghost body in their world while leaving the floating nameplate walking around with nothing under it. Both were measured (dead for 197s and 187s respectively, still going when the test ended) and both now recover on their own in about 14 seconds. Two more reload bugs — a peer going invisible after standing still, and an embedded save-file ghost impersonating a live one — were closed in WO-59 |
-| Reactive ghost combat (self-defense, joining nearby fights) | **Working, always on, no toggle** — a ghost has a real soul and brain, so it defends itself when attacked (treats it as a crime, arms itself, lands real damage) and will join a fight already happening near it, independent of `mp_enable_aggro` below. Verified taking a real player from 100 to 57 HP in one exchange, and separately pursuing and killing another ghost 340 m from where both spawned. A knocked-out ghost also gets back up on its own, usually within a minute. Its position is still pinned to its owner's real movement during a networked session, so it cannot step, close, or retreat — a real, unresolved gap. **A ghost's own attacks are not replicated to its owner** — a remote player's character can kill NPCs in your world that its owner never actually attacked, invisibly to them |
-| NPC aggro on ghosts (`mp_enable_aggro`) | **Working, opt-in, off by default** — this does NOT turn the reactive combat above on or off; that already happens regardless. What the toggle actually gates is *proactive, faction-wide* hostility: when on, a ghost that lands or receives a hit gets attached to one real hostile faction for ~20s, so *any* nearby NPC of an opposing faction — not just whoever it's already fighting — can recognize and attack it unprompted. When off, that native attach never fires. Verified end-to-end (synthetic peer → relay → agent → native plugin → game) via a live on/off comparison and repeated live fights; **unverified** with a second real human. **Known limits, not bugs** — see below |
-| NPC sync (`mp_npc_sync`) | **Working, ON by default** — up to 5 hand-placed NPCs within 30 m of a player mirror that player's world on everyone else's machine: position, walking/running animation, health, death. Costs less bandwidth than one player's position stream. **As of 0.18.2 (WO-60), tracking is proximity-based**: previously only the host's own surroundings were tracked, so an NPC fighting a joining player far from the host was never synced at all. Now whichever machine is actually near an NPC tracks and streams it, with a 15s "engagement hold" so an active fight can't bounce between machines through a brief packet gap. Wire-verified (35/35); **no live two-machine session has run this model yet** — rollback with `mp_npc_proximity off` on the joining machine if it behaves worse than the previous release. **Unverified** with a second real human; dialogue with an NPC *while* it is actively being driven is untested (before/after works) |
-| Dropped-item sync (`mp_item_sync`) | **Working** — a player who drops an item shares it: peers see it appear at the same spot, anyone can pick it up, and the first pickup wins for everyone (a losing pickup rolls back automatically). Verified across food, a bandage stack, armor and weapons. Late joiners converge via a 30s re-broadcast; a save reload self-heals both directions. Deliberately **not** shared: chests and NPC pockets — each player keeps their own loot pool, only deliberate player-to-player handoffs sync |
-| Time-of-day, weather and horse-identity sync | **Working** — a connecting player's clock is pulled forward to match the session's within ~10s, weather is arbitrated and blended across machines (eyeball-verified end to end), and a ridden horse's real identity is adopted by a ghost when that horse is within 60m, falling back to a cosmetic proxy horse otherwise (a hard freeze in this path was diagnosed and fixed) |
-| Voice chat | **Working**, proximity-based |
-| Session framework (invites/accept/decline) | **Working** |
-| Dice engine (Farkle) | **Working** — 59/59 unit tests |
-| Dice ↔ relay integration | **Working** headlessly; **unverified** with two real humans |
-| In-game dice UI | **Working** — played to completion against a scripted opponent; **unverified** with two real humans |
-| Emotes | **Not implemented** |
-| Duelling | **Not implemented** — the wire protocol reserves a slot for it, nothing behind it |
-| Master server (server browser backend) | **Working, live-tested** — a community-contributed C# service (`dotnet/KcdMp.MasterServer/`) replaced the never-run Flask service. Relay↔master↔launcher exercised end-to-end with the real code on all three sides: announce, live update, and delisting within ~1s of a relay disconnecting |
-| Launcher (host/join, dependency handling) | **Built but unverified end-to-end** — see below. Shares the in-game dice overlay's art direction (aged parchment, oak, gold) across every screen rather than looking like a generic dark app; has a **REPORT BUG** button in the status bar that opens this project's GitHub Issues or Discord; and warns you before you connect if you and your peer are on different mod versions, naming which side needs to update |
-| Installer (`KCDMP-Setup-<version>.exe`) | **Working** — silent install/upgrade/uninstall and Steam detection both covered by automated suites (41/41, 21/21) on one machine; the interactive wizard and any clean machine are **unverified**, see `docs/INSTALLER-TESTING.md`. **Hardened against half-applied updates**: Setup refuses to install while the launcher/agent/relay/game is running, verifies every installed file against a size manifest afterwards (verdict in `install-verify.txt`), and the launcher itself warns at startup if the install directory holds a mix of two builds |
-
-**NPC aggro (`mp_enable_aggro`) — known limits, v1 scope, not bugs:**
-- **Hitting another player's ghost in a town is a crime.** A ghost is a real
-  `Civilians`-faction NPC, so attacking one inside a settlement can draw guard
-  aggro onto *you*.
-- **One hostile faction for all of v1** — a real bandit faction hostile to
-  ordinary townsfolk, not a nuanced per-NPC-type system.
-- **The hostile-faction attach depends on a playthrough-specific donor soul**
-  (a leftover NPC from a specific earlier ambush sequence). On a save that
-  hasn't reached that ambush, the attach fails quietly — logged, not crashed,
-  but `mp_enable_aggro` does nothing observable on such a save.
-- **Not synchronized between clients** — whether an NPC treats a ghost as
-  hostile is decided entirely by that NPC's own player's local toggle and
-  local combat events, not agreed between both players.
-- **Not tested with a second real human** — verified end-to-end via a
-  synthetic peer through the real relay and agent, not a real second player.
-
-</details>
-
-## How to play with a friend
-
-1. Both of you install the mod (below) and the launcher.
-2. One of you clicks **HOST GAME** in the launcher — it starts a relay and
-   shows you the address to share.
-3. The other clicks **ADD SERVER**, enters that address, and clicks **JOIN**.
-4. Both of you click through to load into the game world; the launcher
-   handles injecting the plugin and starting your agent once you confirm
-   you're actually in-game.
-5. Once both loaded, ALT+TAB into the launcher and choose the "Connect" option
-
-Same Wi-Fi/LAN: that's it. Different houses: see
-**[docs/NETWORKING.md](docs/NETWORKING.md)** for the two ways to connect
-over the internet (a VPN overlay like Tailscale — recommended — or port
-forwarding), including exactly what address and port to share.
-
-## Install
-
-1. Download **`KCDMP-Setup-<version>.exe`** from the
-   [releases page](https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/releases).
-2. Run it.
-3. That's it — use Host or Join as above.
-
-> **One-time step done by Steam/Warhorse's own tools, not ours — do this
-> before your first launch, regardless of the order you install things in.**
-> The KCD2 Modding Tools app does not ship with its own copy of the game's
-> data (animations, characters, tables, scripts, cinematics, and more) — only
-> a `Developer.pak`. The first time you install it, launch it **once through
-> Steam itself** (its own Play button, or the shortcut Steam creates for it)
-> and let **Workspace Setup**
-> (`Tools\ModdingWorkspaceSetup\WorkspaceSetup.exe`) run — it copies the
-> missing data from your base **Kingdom Come: Deliverance II** install into
-> the Modding Tools folder. You need to own and have the base game installed
-> too, since that's where the copy comes from.
->
-> Skip this and the game will start, then immediately crash:
-> *"Database system error — 114 tables are not loaded. See log for details.
-> Ensure you have latest tables."* This is **not** this mod and **not** our
-> installer — reproduced with the mod entirely removed, same crash. Our
-> `Setup.exe` currently has no way to detect it; see "Not done," below.
-
-The installer finds your game through Steam, deploys the mod into it,
-installs the launcher, writes the game path into the launcher's settings so
-there is nothing to configure, and puts a shortcut on your desktop. If the
-free **KCD2 Modding Tools** are not installed it will say so, offer a button
-that starts that download in Steam, and refuse to continue until they are
-there — the retail game genuinely cannot run this mod, it lacks the debug
-API and the module layout the plugin needs.
-
-You need Kingdom Come: Deliverance II on Steam, plus that Modding Tools
-entry (free, a separate item in your Steam library). Nothing else: the
-launcher, agent and relay carry their own .NET runtime, and the installer
-fetches Microsoft's WebView2 runtime if your Windows doesn't already have it.
-
-Installing by hand still works and is documented in
-[docs/LAUNCHING.md](docs/LAUNCHING.md) — use it if the installer misbehaves
-or your Steam setup is unusual.
-
-### Already installed? Update in 2 steps — no reinstall needed
-
-Everyone you play with needs the same version, not just the host — an old and
-a new build won't connect to each other.
-
-Download **`KCDMP-DirectInstall-<version>.zip`** from the
-[releases page](https://github.com/DeepFriedDepp/kcd2-multiplayer_Reworked/releases)
-and unzip it. It contains two folders, `App` and `Mod`:
-
-1. Copy the **`App`** folder's contents into your existing install folder
-   (`%LocalAppData%\KCDMP` — paste that into Explorer's address bar),
-   overwriting when asked. Your `settings.json` is not in the zip, so the game
-   path you already have is left alone.
-2. Copy the **`Mod`** folder's contents into your game's mod folder
-   (`<your KCD2 Modding Tools folder>\Mods\kdcmp`), overwriting when asked —
-   that's `mod.manifest` and `Data\kdcmp.pak`, the same two files Setup.exe
-   deploys there and the only two that belong there.
-
-Close the launcher first. That's it — no need to run Setup.exe again, and
-nothing else on your PC is touched. Prefer a full reinstall? Running
-`KCDMP-Setup-<version>.exe` over the top does that and keeps your settings
-too.
-
-<details>
-<summary>Building the installer yourself</summary>
-
-```
-powershell -ExecutionPolicy Bypass -File tools\Build-Installer.ps1
-powershell -ExecutionPolicy Bypass -File tools\Build-DirectInstall.ps1 -SkipPublish
-```
-
-The first publishes everything self-contained and compiles
-`release\KCDMP-Setup-<version>.exe`; the second zips that same published
-output into `release\KCDMP-DirectInstall-<version>.zip` (`App\` + `Mod\`, as
-above), reusing the publish the first one just did. Building the installer
-needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-(`winget install --id JRSoftware.InnoSetup`); the zip needs nothing extra.
-
-Both read the version from the `VERSION` file at the repo root and from
-nowhere else, so they cannot disagree about it. That number is chosen by hand,
-never bumped automatically — see [docs/VERSIONING.md](docs/VERSIONING.md).
-
-</details>
-
-## How to play dice
-
-Farkle, played against another real player. This is **not** the vanilla dice
-minigame — it is a separate relay-authoritative engine with its own board
-drawn over the game, so the rules are settled by the relay and neither player
-can desync the other. The vanilla NPC minigame is untouched and still works
-normally; nothing here interferes with it.
-
-**Before you start:** both of you must be connected (green in the launcher)
-and standing near each other in the same part of the world. Dice needs your
-two characters close enough for "nearest player" to mean each other.
-
-### 1. Open the game console
-
-Every step that has no keybind yet is a console command. Open the developer
-console with **`~`** (the key left of `1`; the Modding Tools build has the
-console enabled — retail does not, which is one more reason the mod requires
-that build). Type the command, press Enter, press `~` again to close.
-
-### 2. Challenge someone
-
-Walk up to a dice table, sit down if you like, and run:
-
-```
-mp_dice
-```
-
-That invites the nearest player. If you get *"Sit at a table first"*, the
-table gate is on and there is no dice table in range — either move to a real
-table, or turn the gate off with `mp_dice_gate off` (it ships **off** by
-default, so you should not normally see this).
-
-`mp_dice_table` reports the nearest table it can see, and `mp_dice_seat`
-reports the seat under you — both are for working out why a table is not
-being recognised.
-
-### 3. Accept the challenge
-
-The other player sees the invite prompt and runs:
-
-```
-mp_accept
-```
-
-or `mp_decline` to refuse. The board appears for both of you once accepted.
-
-### 4. Play
-
-Once the board is up, dice is played on **real keys** — no console needed:
-
-| Key | Does |
-|---|---|
-| `F2` `F4` `F5` `F6` `F7` `F8` | Mark die 1–6 (the numbers under the dice on the board) |
-| `F9` | Cast — rolls, or sets aside the dice you marked, depending on the phase |
-| `U` | Clear every mark without rolling |
-| `F11` *(hold)* | Bank your points and end your turn |
-| `F12` *(hold)* | Yield the match |
-
-Bank and yield are **hold-to-confirm**, deliberately — they are irreversible
-and a stray tap should not end your turn or the match.
-
-A turn goes: press `F9` to roll → mark the scoring dice you want to keep →
-`F9` again to set them aside → roll the rest, or `F11` to bank what you have.
-Roll nothing scoring and you **bust**: the board shows what you rolled and
-says so, and your turn ends with nothing banked. First to the target score
-wins.
-
-Every key above has a console equivalent if a key ever fails you:
-`mp_dice_mark 1`…`6`, `mp_dice_cast`, `mp_dice_unmark_all`, `mp_dice_bank`,
-`mp_dice_yield`.
-
-### If the board misbehaves
-
-| Command | Use when |
-|---|---|
-| `mp_dice_redraw` | The board is stale — forces it to re-push |
-| `mp_dice_flush` | The board is stuck or flickering — clears every queued panel |
-| `mp_dice_close` | You want it gone |
-
-<details>
-<summary>Known dice rough edges</summary>
-
-- **Inviting and accepting have no keybind.** `mp_dice`, `mp_accept` and
-  `mp_decline` are the reliable path. Key bindings for these exist in the code
-  but are built on **guessed** action names (`dialog_answer3/4`,
-  `dialog_answer1/2`) that have never been confirmed to fire — treat them as
-  not working.
-- **Nothing is wagered.** The match is a pure score contest; no groschen
-  changes hands. Moving real currency needs a native write and has not been
-  built.
-- **A full two-human match has never been played.** Everything above was
-  verified against a scripted opponent (`tools\Bot-DiceOpponent.ps1`) on one
-  machine.
-
-</details>
-
-## Architecture
-
-```
-PC1: [KCD2 + Mod] ←localhost→ [KcdMpClient.exe] ──TCP──┐
-                                                          ├── [KcdMpServer]
-PC2: [KCD2 + Mod] ←localhost→ [KcdMpClient.exe] ──TCP──┘
-```
-
-- **`KcdMpServer`** — the relay. Whoever hosts runs this; everyone else
-  connects to its address. Binds all interfaces by default, so LAN and
-  VPN-overlay play need no extra config — see `docs/NETWORKING.md`.
-- **`KcdMpClient.exe`** — the per-player agent. Reads your local game state
-  and pushes it to the relay; receives everyone else's state and drives your
-  local ghosts/voice/combat.
-- **`KCDMP.dll`** — the native plugin, injected into the game process. Talks
-  to the agent over a local named pipe; reads and writes game state through
-  the engine's own RTTR reflection layer (exported by `CrySystem.dll`), not
-  offsets or signature scans.
-- **`KCDMP_launcher`** — the desktop app you actually run: server
-  browser/host/join UI, launches the game, drives injection, starts the
-  agent.
-
-Each agent only ever talks to its own machine's game — there is no
-cross-machine game-API traffic, only the relay TCP connection.
-
-## Repository layout
-
-| Path | What it is |
-|---|---|
-| `kdcmp/` | The game mod — Lua and the built `kdcmp.pak` |
-| `dotnet/KcdMp.Client/` | `KcdMpClient.exe`, the per-PC agent |
-| `dotnet/KcdMp.Server/` | `KcdMpServer.exe`, the relay |
-| `dotnet/KcdMp.Protocol/` | Shared wire protocol |
-| `dotnet/KcdMp.Farkle/` | The dice engine (pure state machine, no external deps) |
-| `native/KCDMP/` | The injected plugin (C++) |
-| `native/KCDMP_LauncherInjector/` | The injector executable |
-| `KCDMP_launcher/` | The desktop launcher (Photino/Blazor) |
-| `dotnet/KcdMp.MasterServer/` | `KcdMpMasterServer.exe`, the server-discovery backend — see `docs/MASTER-SERVER.md` |
-| `docs/` | Design notes and session handoffs — start with `docs/PROJECT-STATE.md` |
-
-## Building from source
-
-Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download) and, for
-the native plugin, VS Build Tools with the C++ workload (CMake + Ninja,
-located automatically via `vswhere`).
-
-```powershell
-dotnet build KCD2-MP.sln
-powershell -File native\Build-Native.ps1
-```
-
-To assemble a self-contained release folder (no .NET runtime required on
-the target machine — the native plugin already links its C++ runtime
-statically, so there's nothing extra to bundle there):
-
-```powershell
-powershell -File tools\Publish-Release.ps1
-```
-
-Run things directly during development:
-
-```powershell
-dotnet run --project dotnet\KcdMp.Server
-dotnet run --project dotnet\KcdMp.Client -- --host localhost --name PC1
-dotnet run --project KCDMP_launcher
-dotnet run --project dotnet\KcdMp.MasterServer
-```
-
-The master server (`dotnet/KcdMp.MasterServer/`) is optional — a relay and
-launcher with each other's address connect directly and never touch it. See
-`docs/MASTER-SERVER.md` for how to point a relay and the launcher at one.
-
-## Testing
-
-```powershell
-dotnet run --project dotnet\KcdMp.Server -- --port 7778   # in one window
-powershell -File tools\Test-Combat.ps1
-powershell -File tools\Test-Sessions.ps1 -IncludeTimeout
-powershell -File tools\Test-Dice.ps1
-powershell -File tools\Test-PlayerCombat.ps1
-dotnet test dotnet\KcdMp.Farkle.Tests
-```
-
-`tools\Test-Pipe.ps1` additionally needs the real game running with the
-plugin injected — see the script header. `tools\Test-AppearanceE2E.ps1` and
-`tools\Test-PlayerVitalsE2E.ps1` need the real game and a running agent, but
-**not** the native plugin — appearance sync and player vitals never touch the
-DLL or the pipe, only the reflection debug API. `tools\Test-ReloadBehaviour.ps1`
-needs all of that plus a human to reload a save mid-test. Every synthetic-peer
-script derives its wire-protocol version from `tools\ProtocolVersion.ps1`
-rather than hardcoding it — never add a new literal version byte to a script.
-
-## What's left undone, what still needs a human, and reporting bugs
-
-<details>
-<summary><strong>Not done</strong> — genuinely missing or impossible, as opposed to untested</summary>
-
-- **Emotes** — not implemented.
-- **Duelling** — not implemented. The wire protocol reserves an
-  `InteractionKind.Duel` value and nothing at all sits behind it; it reads
-  like a shipped feature to anyone skimming `Protocol.cs` and it is not one.
-- **Dice wagers** — a match is a pure score contest. No groschen moves.
-  Transferring real currency needs a native (RTTR) write, not a Lua one.
-- **Dice invite / accept / decline keybinds** — the console commands
-  (`mp_dice`, `mp_accept`, `mp_decline`) are the working path. The key
-  bindings in the code are built on guessed engine action names that have
-  never been confirmed to fire.
-- **Ranged weapon swings on ghosts** — melee is fully animated; bow/crossbow
-  ranged action names are recorded but not yet wired.
-- **Appearance sync's write latency is genuinely variable** — equipping or
-  unequipping one item on a ghost usually lands within a second, but under
-  heavier load it has taken up to a couple of minutes, and it self-heals via
-  a 30-second resend rather than promising a fixed time. `mp_sync_appearance`
-  forces an immediate resync if you don't want to wait. Hairstyle, face and
-  beard do not sync — no reflected engine surface exposes them at all.
-  Weapons *do* sync, through the same mechanism as armor.
-- **Unequips are not verified the way equips are** — the agent retries what
-  should now be *on* a ghost, but never confirms that what should now be
-  *gone* actually went. A weapon unequipped several steps earlier was once
-  observed back in a ghost's equipped map, reproducibly, minutes later. Not
-  root-caused: it may be the game refilling an empty weapon slot from the
-  ghost's own inventory rather than a failed write.
-- **The soul walk right after injection still gives up after one 5s try** —
-  the tick-liveness check above it now polls and retries; the step after it
-  does not. Inject in the narrow window where the game has started ticking
-  but a save has not finished loading and that injected instance declines to
-  start the pipe, with no second attempt.
-- **Reading the vanilla dice minigame's live state isn't possible** — its
-  in-progress state isn't reachable from outside it. That's why dice is a
-  separate relay-authoritative engine instead of mirroring the vanilla
-  minigame.
-- **Auto-detecting "you are actually in the world"** — the launcher still asks
-  you to confirm you have loaded your save before it injects. Injecting too
-  early is no longer fatal (the plugin waits for the game's tick instead of
-  giving up on it), but the launcher cannot yet decide for you when you are
-  really in the world, so it asks.
-- **Nameplates are hidden while *your own* menu is open** — ghost bodies keep
-  moving during your menu, but the `System.DrawLabel`/`DrawText` calls that
-  draw names are immediate-mode, one frame per call, and the update pump is
-  not frame-locked to the renderer. Pumping them would strobe rather than
-  render, so they stay off.
-- **The installer does not detect an incomplete Modding Tools data
-  install** — it verifies `Framework.dll`/`CrySystem.dll` exist beside
-  `KingdomCome.exe`, which proves the *engine binaries* are the right build.
-  It does not check for the actual game data (`Data\Tables.pak` and the
-  other mandatory paks), so a Modding Tools install that has never had its
-  one-time **Workspace Setup** step run (see Install, above) passes the gate
-  and then crashes the game with "114 tables are not loaded" — a real,
-  reproduced failure, not a hypothetical one.
-- **Installer code signing** — Setup.exe is unsigned, so a first download
-  shows SmartScreen's "Windows protected your PC". Click *More info* →
-  *Run anyway*.
-- **A moved game is only half-handled** — re-running Setup finds the new path
-  and re-deploys the mod, but will not overwrite a `GamePath` already set in
-  your `settings.json`. The launcher notices the stale path at startup and
-  opens Settings; it does not fix it for you.
-- **`settings.json` follows the working directory, not the launcher** — the
-  shortcuts the installer creates set it correctly. Launch
-  `KCDMP_launcher.exe` from some other directory and it will read and write
-  its settings there instead.
-- **A claimed NPC's health still converges by damage events only** —
-  simultaneous kill/loot arbitration between two players fighting the same
-  NPC remains unhandled.
-- **Animals don't sync** — chickens, dogs, deer and the like are out of scope
-  by design, not a bug.
-
-</details>
-
-### Reporting a bug
-
-The launcher's status bar has a **REPORT BUG** button — it opens either the
-GitHub Issues page or this project's Discord directly, whichever you'd
-rather use.
-
-Say which side you were on (host or join), what you were doing, and what you
-expected instead. Then attach whatever of these exists — the paths are exact,
-and `%LocalAppData%` / `%AppData%` / `%Temp%` can be pasted straight into
-Explorer's address bar:
-
-| What | Where | Attach it when |
+| | ตัวเดิม 0.18.2 | fork นี้ |
 |---|---|---|
-| Launcher log | `%AppData%\KCDMP_Launcher\app<YYYYMMDD>.log` | Always. This is the first one to grab |
-| Launcher settings | `%LocalAppData%\KCDMP\settings.json` | Always — it is three lines and it says which game it found |
-| Native plugin log | `%LocalAppData%\KCDMP\kcdmp-native.log` | Injection, ghosts, combat, or dice not appearing in game |
-| Game log | `<ModdingTools>\kcd.log`, e.g. `...\steamapps\common\KCD2Mod\kcd.log` | Anything in-game. Look for `[KCD2-MP]` lines |
-| Agent output | The `KcdMpClient.exe` console window — **it writes no log file**, so copy the text out before closing it | Connected but nothing syncs |
-| Relay output | The `KcdMpServer.exe` console window on the **host's** PC | Nobody can join, or people get dropped |
-| Installer log | `%Temp%\Setup Log <date> #NNN.txt` — newest one | Anything that went wrong during install |
+| ผู้เล่น **Xbox Game Pass** | เล่นไม่ได้ (ต้องใช้ Steam + Modding Tools) | **เล่นได้** — agent คุยกับเกมผ่าน RemoteConsole แทน debug API |
+| ตำแหน่ง NPC | แต่ละเครื่องคิดเอง ยืมกันได้ 5 ตัวในระยะ 30 ม. แล้วแย่งกัน | **Host World** — เกมเครื่องเดียวเป็นโลกกลาง รายงาน 40 ตัวในระยะ 60 ม. เครื่องอื่นแสดงผลตาม |
+| เครื่องโฮสต์แยก | ไม่มี | มีตัวเปิด (relay + เกม + agent) — **ยังไม่เคยรันกับเกมจริง** |
+| ตัวแทนของเพื่อน (ฝั่ง Game Pass) | — | หุ่นเชิดไม่มี AI ลอกหน้าตาจากตัวเรา เดินต่อเนื่อง ฟันให้เห็น |
+| ตัวติดตั้ง | `KCDMP-Setup` (Steam เท่านั้น) | `Setup.bat` ตัวเดียว ใช้ได้ทั้ง Game Pass / Steam / เครื่องโฮสต์ |
 
-Also useful: your version (Add/Remove Programs → *KCD2 Multiplayer*), whether
-both players are on the same network, and — for anything that looks like the
-game ignoring the mod — confirmation that `<ModdingTools>\Mods\kdcmp\` exists
-and that you launched through the launcher rather than through Steam.
+agent ยังรายงานเวอร์ชัน `0.18.2` และ wire protocol ไม่เปลี่ยน จึงใช้ relay ของ 0.18.2 ตัวเดิมได้ และเล่นร่วมกับผู้เล่น Steam ที่ใช้ KCDMP 0.18.2 ได้
 
-Please redact your public IP from logs if you were playing over the internet.
+## ติดตั้งและเล่น
 
-## License and provenance
+1. ดาวน์โหลด **`KCDMP-0.18.2-HostWorld.zip`** จาก [หน้า Releases](https://github.com/ILliTAH/KingdomCome-Together/releases) แล้วแตกไฟล์
+2. ปิดเกม แล้วดับเบิลคลิก **`Setup.bat`** — มันบอกว่าเจอเกมแบบไหนในเครื่อง แล้วให้เลือก
 
-Licensed under the [GNU General Public License v3.0](LICENSE).
+| เลือก | ใช้กับ | ทำอะไร |
+|---|---|---|
+| **1** Play on Xbox Game Pass | ผู้เล่น Game Pass | ติดตั้งม็อด เปิดเกมด้วย `-devmode` แล้วต่อ relay ให้ (ครั้งแรกถามที่อยู่ relay) |
+| **2** Install the mod for Steam | ผู้เล่น Steam ที่ลง [KCDMP 0.18.2](https://github.com/DeepFriedDepp/KingdomCome-Together/releases/tag/0.18.2) ไว้แล้ว | วางไฟล์ม็อดลง Modding Tools จากนั้นเล่นผ่าน KCDMP Launcher ตามเดิม |
+| **3** Run this machine as WORLD HOST | เครื่องเซิร์ฟเวอร์ที่มี Steam + KCD2 + Modding Tools | เปิด relay + เกม + agent ให้เครื่องนี้เป็นโลกกลาง |
 
-This is a fork of [`marczukmichal/kcd2-multiplayer`](https://github.com/marczukmichal/kcd2-multiplayer),
-**continued here with the original developer's permission**, including
-permission to upstream changes back if the two projects converge. All
-credit for the original concept and implementation goes to marczukmichal —
-this fork exists to keep building on that work, not to replace it. The
-upstream repository carries no license of its own; that's a fact about the
-upstream project, not a claim that it was itself GPL-licensed. This fork's
-own code, from the point of forking onward, is licensed under GPLv3 as
-stated above.
+**ทุกเครื่องในเซสชันต้องใช้ zip จาก release เดียวกัน** รายละเอียดแต่ละโหมดอยู่ใน `README-TH.md` ภายใน zip
+
+```
+ เครื่องเซิร์ฟเวอร์ (Steam)  ── relay :7778 + เกม = โลกกลาง  ("[HOST] world")
+        ▲                         ▲
+ ผู้เล่น Steam (guest)        ผู้เล่น Game Pass (guest)
+```
+
+ไม่มีเครื่องโฮสต์แยกก็เล่นได้: ผู้เล่น Steam จะเป็นโฮสต์เอง ผู้เล่น Game Pass เป็น guest
+
+## สถานะ: อะไรทดสอบแล้ว
+
+| ส่วน | สถานะ |
+|---|---|
+| ผู้เล่น Game Pass เล่นกับผู้เล่น Steam 0.18.2 ผ่าน relay จริง | **ทดสอบกับเกมจริงแล้ว** (2026-09-30) |
+| ตัวแทนเพื่อนไม่มี AI / เดินต่อเนื่อง / ท่าฟัน / อากาศหลังโหลดเซฟ | **ทดสอบกับเกมจริงแล้ว** |
+| Host World: กติกา host–guest, โฮสต์รายงาน 40 ตัว, NPC เคลื่อนที่ต่อเนื่อง, ซ่อนตัวละครโฮสต์ | ผ่านชุดเทสต์ — **ยังไม่เคยรันกับเกมจริง** |
+| ม็อดของ fork นี้บนเกม Steam / Modding Tools | **ยังไม่เคยรัน** |
+| ตัวเปิดเครื่องโฮสต์ (`Start-WorldHost`) และการให้โฮสต์ตามผู้เล่น | **ยังไม่เคยรัน** |
+
+งานทั้งหมดทำบนเครื่อง Game Pass ซึ่งรันเกม Steam ไม่ได้ — ฝั่ง Steam และเครื่องโฮสต์ต้องตรวจตาม
+[รายการใน docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) ก่อนใช้จริง
+
+## ฟีเจอร์ต่อแพลตฟอร์ม
+
+| | ผู้เล่น Steam | ผู้เล่น Game Pass |
+|---|---|---|
+| เห็นผู้เล่นอื่น เดิน วิ่ง ป้ายชื่อ | ✅ | ✅ |
+| ส่งตำแหน่ง เลือด stamina ของเรา | ✅ | ✅ |
+| ท่าฟันของผู้เล่นอื่น | ✅ (native) | ✅ (คลิปฟันจริง) |
+| สภาพอากาศและเวลาตามเซสชัน | ✅ | ✅ |
+| NPC ตามโลกของโฮสต์ (ตำแหน่ง เดิน/วิ่ง ถืออาวุธ) | ✅ | ✅ |
+| คุยเสียงตามระยะ, Farkle | ✅ | ยังไม่ได้ทดสอบ |
+| ชุดเกราะ/อาวุธของผู้เล่นอื่นตรงกับของจริง | ✅ | ❌ (ตัวแทนลอกหน้าตาจากตัวเราแทน) |
+| ความเสียหาย/การตายข้ามเครื่อง | ✅ | ❌ |
+| ไอคอนผู้เล่นบนแผนที่ | ❌ | ❌ |
+
+✅ = รองรับ ไม่ได้แปลว่าทดสอบแล้วทุกข้อ — ดูตาราง "สถานะ" ข้างบนว่าข้อไหนทดสอบกับเกมจริงแล้ว
+คอลัมน์ Steam คือความสามารถของ 0.18.2 ตัวเดิม ดู [README ของ 0.18.2](https://github.com/DeepFriedDepp/KingdomCome-Together/blob/0.18.2/README.md)
+สำหรับรายละเอียด วิธีเล่น Farkle และข้อจำกัดของตัวเดิม
+Game Pass ทำแถว ❌ ไม่ได้เพราะไม่มี debug API และ native plugin ของ build Modding Tools
+
+## ข้อจำกัดของ Host World
+
+- ผู้เล่นต้องอยู่บริเวณเดียวกับโฮสต์ (ราว 60 ม.) — เกมของโฮสต์คำนวณ NPC ละเอียดเฉพาะรอบตัวมัน ไกลกว่านั้นแต่ละคนเห็นโลกของตัวเอง
+- กิจกรรมของ NPC (นั่ง ทำงาน คุย) ไม่ถูกส่ง — guest เห็นแค่ เดิน / วิ่ง / ยืน / ถืออาวุธ
+- เควส บทสนทนา ร้านค้า หีบ ยังเป็นของใครของมัน
+- เครื่องโฮสต์กับเครื่องส่วนตัวใช้บัญชี Steam เดียวกันเปิดเกมพร้อมกันไม่ได้
+- ตัวละครของโฮสต์ไม่มีใครเล่น แต่ยังถูก NPC ตีได้ — ยังไม่มีโค้ดป้องกัน
+
+ความเสี่ยงและงานค้างทั้งหมดเรียงตามความสำคัญอยู่ใน [docs/HOST-WORLD-GUIDE.md §5](docs/HOST-WORLD-GUIDE.md)
+
+## ความปลอดภัย
+
+- เกม Game Pass ต้องเปิดด้วย `-devmode` ซึ่งเปิดพอร์ต **4600** ที่ไม่มีรหัสผ่าน — ตัวติดตั้งสร้างกฎ firewall บล็อกเครื่องอื่นให้ (ขอสิทธิ์ admin ครั้งเดียว)
+- บนเครื่องเซิร์ฟเวอร์ เปิดออกนอกเครื่องเฉพาะ **TCP 7778** (relay) — ห้ามเปิด `:1403` หรือ `:4600`
+- ที่อยู่ relay เก็บใน `relay.txt` บนเครื่องของแต่ละคน ไม่อยู่ใน repo และไม่อยู่ใน zip
+
+## สำหรับนักพัฒนา
+
+ต้องมี [.NET 8 SDK](https://dotnet.microsoft.com/download) ขึ้นไป และ Python 3 + `pip install lupa`
+
+```powershell
+cd dotnet
+dotnet test KcdMp.Client.Tests -c Release      # agent: RemoteConsole, log tail (25 tests)
+dotnet test KcdMp.Farkle.Tests -c Release      # ของเดิม (59 tests)
+cd ..
+python tools\Test-GamePassLua.py               # ม็อด: รัน kdcmp.lua ทั้งไฟล์บน Lua 5.1 โดยจำลองเกม
+powershell -File tools\Build-And-Install-Mod.ps1 -NoInstall   # สร้าง kdcmp.pak ใหม่หลังแก้ Lua
+powershell -File tools\Build-HostWorldRelease.ps1             # สร้าง release\KCDMP-<VERSION>-HostWorld.zip
+```
+
+| ที่ | มีอะไร |
+|---|---|
+| `dotnet/KcdMp.Client/` | agent — ของ fork นี้: `RemoteConsole*.cs`, `ILuaCommandSink.cs`, การแก้ใน `LogTailGameTransport.cs` และ `GameBridge.cs` |
+| `dotnet/KcdMp.Client.Tests/` | เทสต์ของ agent รวม RemoteConsole จำลองที่บังคับกติกาเดียวกับเกมจริง |
+| `kdcmp/` | ม็อด (Lua + `kdcmp.pak`) — ค้นคำว่า `Game Pass fork` และ `Host world` ใน `kdcmp.lua` |
+| `package/` | `Setup`, `Start-GamePass`, `Start-WorldHost` ที่อยู่ใน zip |
+| `tools/Test-GamePassLua.py` | เทสต์ม็อดแบบ offline |
+| `dotnet/KcdMp.Server/`, `KcdMp.Protocol/`, `native/`, `KCDMP_launcher/`, `installer/` | ของ 0.18.2 ไม่ได้แก้ |
+
+เอกสาร:
+- [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) — ติดตั้ง รัน รายการตรวจสอบ ความเสี่ยง ปุ่มปรับ (สำหรับผู้ดูแลเครื่องเซิร์ฟเวอร์)
+- [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) — ทุกอย่างที่เปลี่ยนจาก 0.18.2 พร้อมตัวเลขที่วัดได้
+- [docs/superpowers/specs/2026-09-30-host-world-npc-sync-design.md](docs/superpowers/specs/2026-09-30-host-world-npc-sync-design.md) — แบบของ Host World
+- [docs/LAUNCHING.md](docs/LAUNCHING.md), [docs/NETWORKING.md](docs/NETWORKING.md) — ของ 0.18.2 (ฝั่ง Steam และการตั้ง relay)
+
+## License และที่มา
+
+[GNU General Public License v3.0](LICENSE) เหมือนต้นทาง
+
+สายของโปรเจกต์: [`marczukmichal/kcd2-multiplayer`](https://github.com/marczukmichal/kcd2-multiplayer) (แนวคิดและตัวแรก)
+→ [`DeepFriedDepp/KingdomCome-Together`](https://github.com/DeepFriedDepp/KingdomCome-Together) (พัฒนาต่อโดยได้รับอนุญาตจากผู้พัฒนาเดิม)
+→ fork นี้ แยกจาก tag `0.18.2` เมื่อ 2026-09-30 เครดิตของตัวม็อดทั้งหมดเป็นของสองโปรเจกต์ข้างต้น
+fork นี้เพิ่มเฉพาะส่วน Game Pass และ Host World ตามที่ระบุไว้ใน changelog
