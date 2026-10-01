@@ -12,10 +12,14 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-555555?style=flat-square">
 </p>
 
-**English summary.** A fork of [Kingdom Come: Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`. It lets **Xbox Game Pass** players join a stock 0.18.2 session, and adds **Host World**: a dedicated host machine that nobody plays on decides where the NPCs are, and every player's game displays it. One installer (`KingdomCome-Coop-Setup`) carries everything -- the stock launcher with both builds added, the agent, the relay, the native plugin, the mod and a skip save -- so nothing else has to be installed first. The installer, the launcher and the Game Pass path are tested on a live game; the Steam and dedicated-host paths have never been run. Details: [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) (Thai) and [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) (English).
+**English summary.** A fork of [Kingdom Come: Together](https://github.com/DeepFriedDepp/KingdomCome-Together) at tag `0.18.2`. It lets **Xbox Game Pass** players join a stock 0.18.2 session, and adds **Host World**: a dedicated host machine that nobody plays on decides where the NPCs are, and every player's game displays it. One installer (`KingdomCome-Coop-Setup`) carries everything -- the stock launcher with both builds added, the agent, the relay, the native plugin, the mod and a skip save -- so nothing else has to be installed first. The installer, the launcher and the Game Pass path are tested on a live game; the Steam and dedicated-host paths have never been run. Details: [docs/HOST-WORLD-GUIDE.md](docs/HOST-WORLD-GUIDE.md) (Thai) and [docs/GAMEPASS-FORK-CHANGELOG.md](docs/GAMEPASS-FORK-CHANGELOG.md) (English). If your friends play **KCD:MP** (kcd-mp.com, dedicated servers on an empty map) rather than Together, this cannot reach them -- use [KCD:MP on Xbox Game Pass](https://github.com/ILliTAH/kcdmp-gamepass) instead.
 
 > **ไม่เกี่ยวข้องกับ Warhorse Studios** — Kingdom Come: Deliverance เป็นเครื่องหมายการค้าของ Warhorse Studios
 > โปรเจกต์นี้เป็นงานแฟนเมดที่ไม่แสวงกำไร และยังเป็นรุ่นทดลอง ควรสำรองเซฟก่อนเล่น
+
+> **เพื่อนของคุณเล่น KCD:MP (kcd-mp.com) ไม่ใช่ Together?** ชุดนี้ต่อไม่ถึงเซิร์ฟเวอร์ของ KCD:MP (คนละเครือข่ายกัน)
+> ผู้เล่น Game Pass ที่จะเข้า KCD:MP ใช้ **[KCD:MP on Xbox Game Pass](https://github.com/ILliTAH/kcdmp-gamepass)** แทน —
+> ตารางเทียบว่าแบบไหนใช้กับอะไรอยู่ใน README ที่นั่น (สั้น ๆ: เพื่อนส่ง `ip:7777` = KCD:MP, ส่ง `ip:7778` หรืออยากเล่นเนื้อเรื่องด้วยกัน = ชุดนี้)
 
 ---
 
