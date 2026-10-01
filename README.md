@@ -39,7 +39,9 @@ agent ยังรายงานเวอร์ชัน `0.18.2` และ wir
 
 ## ติดตั้งและเล่น
 
-1. ดาวน์โหลด **`KingdomCome-Coop-Setup-0.18.2.exe`** จาก [หน้า Releases](https://github.com/ILliTAH/KingdomCome-Together/releases) แล้วรัน
+1. ตัวติดตั้ง **`KingdomCome-Coop-Setup-0.18.2.exe`** ไม่ได้แจกบน[หน้า Releases](https://github.com/ILliTAH/KingdomCome-Together/releases)แล้ว
+   (หน้านั้นตอนนี้มีตัวติดตั้งของ [KCD:MP on Xbox Game Pass](https://github.com/ILliTAH/kcdmp-gamepass) แทน) —
+   build เองด้วย `powershell -ExecutionPolicy Bypass -File tools\Build-Installer.ps1` (ต้องมี .NET SDK และ Inno Setup 6) แล้วรันไฟล์ใน `release\`
    ไม่ต้องลงอะไรก่อน ไม่ต้องใช้สิทธิ์ admin
 2. เปิด **Kingdom Come Co-op** จากไอคอนบนเดสก์ท็อป — launcher หาเกมในเครื่องเอง:
    Kingdom Come: Deliverance II จาก **Xbox Game Pass** หรือ **KCD2 Modding Tools** จาก Steam
